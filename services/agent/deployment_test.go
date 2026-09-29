@@ -65,3 +65,34 @@ func TestValidateComposeDeploymentPayload(t *testing.T){
  p.Runtime=deploymentRuntime{ComposeProject:ptrString("clouddeck-prod")}
  if err:=validateDeploymentPayload(p);err!=nil{t.Fatalf("expected valid Compose payload: %v",err)}
 }
+
+
+func validComposeRollbackPayload()composeRollbackPayload{
+ return composeRollbackPayload{
+  DeploymentID:"123e4567-e89b-12d3-a456-426614174000",
+  ComposeProject:"clouddeck-prod",
+  CurrentComposeContainerIDs:map[string]string{
+   "api":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+   "worker":"1111111111111111111111111111111111111111111111111111111111111111",
+  },
+  PreviousComposeContainerIDs:map[string]string{
+   "api":"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+   "worker":"2222222222222222222222222222222222222222222222222222222222222222",
+  },
+ }
+}
+
+func TestValidateComposeRollbackPayload(t *testing.T){
+ p:=validComposeRollbackPayload()
+ if err:=validateComposeRollbackPayload(p);err!=nil{t.Fatalf("expected valid Compose rollback payload: %v",err)}
+}
+
+func TestValidateComposeRollbackPayloadRejectsBadMaps(t *testing.T){
+ tests:=[]func(*composeRollbackPayload){
+  func(p *composeRollbackPayload){p.ComposeProject="bad/project"},
+  func(p *composeRollbackPayload){p.CurrentComposeContainerIDs["bad/service"]=p.CurrentComposeContainerIDs["api"]},
+  func(p *composeRollbackPayload){p.PreviousComposeContainerIDs["api"]=p.CurrentComposeContainerIDs["api"]},
+  func(p *composeRollbackPayload){p.PreviousComposeContainerIDs=map[string]string{}},
+ }
+ for i,mutate:=range tests{p:=validComposeRollbackPayload();mutate(&p);if validateComposeRollbackPayload(p)==nil{t.Fatalf("case %d should fail",i)}}
+}
