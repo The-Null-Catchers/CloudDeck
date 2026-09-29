@@ -58,19 +58,18 @@ export async function terminalRoutes(app:FastifyInstance){
     let closed=false;
     let persisted=false;
     let pendingReason='client_closed';
-    let timeout:ReturnType<typeof setTimeout>;
     const finish=async(reason:string)=>{
       if(closed)return;
       closed=true;
       pendingReason=reason;
       clearTimeout(timeout);
       terminals.delete(terminalKey);
-      try{sendAgentEnvelope(ticket.serverId,{type:'terminal.close',sessionId});}catch{}
+      try{sendAgentEnvelope(ticket.serverId,{type:'terminal.close',sessionId});}catch{void 0;}
       if(persisted)await pool.query('UPDATE terminal_sessions SET ended_at=now(),close_reason=$2 WHERE id=$1 AND ended_at IS NULL',[sessionId,reason]).catch(()=>undefined);
       await audit(ticket.organizationId,ticket.userId,'terminal.session.closed','server',ticket.serverId,request.ip,{sessionId,reason}).catch(()=>undefined);
       if(socket.readyState===1)socket.close(1000,'Terminal closed');
     };
-    timeout=setTimeout(()=>{void finish('timeout');},30*60_000);
+    const timeout=setTimeout(()=>{void finish('timeout');},30*60_000);
 
     terminals.set(terminalKey,message=>{
       if(socket.readyState!==1)return;
