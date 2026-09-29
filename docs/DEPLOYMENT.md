@@ -57,3 +57,21 @@ CloudDeck validates all of these before writing the application row:
 4. the configured `Dockerfile` or Compose file exists on that branch and is a file.
 
 Source paths must be relative, contain no `.`/`..` segments, and use a conservative filename character set. Application creation is audited with repository, branch, deployment type, and the verified commit SHA. The branch remains the configured source; the deployment worker will resolve and persist the exact commit SHA again when a deployment is actually enqueued.
+
+
+## Deployment request contract
+
+`POST /api/v1/applications/:applicationId/deployments` creates a durable deployment request after re-validating the configured GitHub source.
+
+Requirements and guarantees:
+
+- requires `deployment.manage` for the application's workspace
+- requires an `Idempotency-Key` header (8-128 URL/header-safe characters)
+- resolves the configured branch through the linked GitHub App
+- pins the request to the resolved 40-character commit SHA
+- verifies the configured Dockerfile or Compose file at that pinned commit, not at a moving branch ref
+- snapshots repository, branch, deployment type, source path, installation connection and requesting user onto the deployment
+- inserts the initial `queued` event and audit record in the same PostgreSQL transaction
+- duplicate requests with the same application + idempotency key return the existing deployment instead of creating another deployment
+
+The `queued` state currently means a durable, validated request exists. A later worker change is responsible for handing queued records to BullMQ and advancing them through `cloning -> building -> deploying -> health-checking`. The API never marks a deployment successful merely because it was requested.
