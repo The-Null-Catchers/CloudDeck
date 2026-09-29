@@ -75,3 +75,21 @@ Requirements and guarantees:
 - duplicate requests with the same application + idempotency key return the existing deployment instead of creating another deployment
 
 The `queued` state currently means a durable, validated request exists. A later worker change is responsible for handing queued records to BullMQ and advancing them through `cloning -> building -> deploying -> health-checking`. The API never marks a deployment successful merely because it was requested.
+
+
+## Application runtime targets
+
+A verified GitHub source is not enough to activate a deployment. CloudDeck also requires an explicit, validated runtime target so the deployment worker never guesses how repository contents should run on a server.
+
+For Dockerfile applications, runtime configuration includes:
+
+- a strict container name
+- optional container port
+- optional host port (only valid when a container port is set)
+- restart policy: `no`, `always`, `unless-stopped`, or `on-failure`
+
+For Docker Compose applications, runtime configuration includes a strict Compose project name. Compose service topology remains sourced from the verified Compose file.
+
+Runtime targets are unique per server where collisions would be unsafe: container names, published host ports, and Compose project names. Existing applications created before this schema can be completed through `PUT /api/v1/applications/:applicationId/runtime`.
+
+Every new deployment snapshots its runtime target together with the pinned source commit. Editing the application later therefore cannot silently mutate an already-created deployment or rollback record.

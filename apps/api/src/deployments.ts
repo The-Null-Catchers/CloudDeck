@@ -79,7 +79,8 @@ export async function deploymentRoutes(app:FastifyInstance){
     const {applicationId}=z.object({applicationId:uuid}).parse(request.params);
     const requestKey=parseDeploymentIdempotencyKey(request.headers['idempotency-key']);
     const application=await pool.query(
-      `SELECT id,organization_id,github_installation_id,repository_full_name,branch,deployment_type,source_path
+      `SELECT id,organization_id,github_installation_id,repository_full_name,branch,deployment_type,source_path,
+              container_name,container_port,host_port,restart_policy,compose_project
        FROM applications
        WHERE id=$1`,
       [applicationId]
@@ -87,6 +88,12 @@ export async function deploymentRoutes(app:FastifyInstance){
     if(!application.rowCount)throw Object.assign(new Error('Application not found'),{statusCode:404});
     const sourceConfig=application.rows[0];
     await membership(userId,sourceConfig.organization_id,'deployment.manage');
+    const runtimeReady=sourceConfig.deployment_type==='dockerfile'
+      ? Boolean(sourceConfig.container_name)
+      : sourceConfig.deployment_type==='compose'
+        ? Boolean(sourceConfig.compose_project)
+        : false;
+    if(!runtimeReady)throw Object.assign(new Error('Application runtime configuration is required before deployment'),{statusCode:409});
 
     const source=await verifyGitHubSource(
       sourceConfig.organization_id,
@@ -100,13 +107,15 @@ export async function deploymentRoutes(app:FastifyInstance){
       const inserted=await db.query(
         `INSERT INTO deployments(
            application_id,commit_sha,branch,state,requested_by,idempotency_key,
-           github_installation_id,repository_full_name,deployment_type,source_path
+           github_installation_id,repository_full_name,deployment_type,source_path,
+           container_name,container_port,host_port,restart_policy,compose_project
          )
-         VALUES($1,$2,$3,'queued',$4,$5,$6,$7,$8,$9)
+         VALUES($1,$2,$3,'queued',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          ON CONFLICT (application_id,idempotency_key) WHERE idempotency_key IS NOT NULL
          DO NOTHING
          RETURNING id,application_id,commit_sha,branch,state,created_at,requested_by,
-                   github_installation_id,repository_full_name,deployment_type,source_path`,
+                   github_installation_id,repository_full_name,deployment_type,source_path,
+                   container_name,container_port,host_port,restart_policy,compose_project`,
         [
           applicationId,
           source.commitSha,
@@ -116,7 +125,12 @@ export async function deploymentRoutes(app:FastifyInstance){
           source.connectionId,
           sourceConfig.repository_full_name,
           sourceConfig.deployment_type,
-          source.sourcePath
+          source.sourcePath,
+          sourceConfig.container_name,
+          sourceConfig.container_port,
+          sourceConfig.host_port,
+          sourceConfig.restart_policy,
+          sourceConfig.compose_project
         ]
       );
       if(inserted.rowCount){
@@ -130,13 +144,20 @@ export async function deploymentRoutes(app:FastifyInstance){
           repository:sourceConfig.repository_full_name,
           branch:sourceConfig.branch,
           commitSha:source.commitSha,
-          deploymentType:sourceConfig.deployment_type
+          deploymentType:sourceConfig.deployment_type,
+          runtime:sourceConfig.deployment_type==='dockerfile'?{
+            containerName:sourceConfig.container_name,
+            containerPort:sourceConfig.container_port,
+            hostPort:sourceConfig.host_port,
+            restartPolicy:sourceConfig.restart_policy
+          }:{composeProject:sourceConfig.compose_project}
         },db);
         return {deployment:inserted.rows[0],created:true};
       }
       const existing=await db.query(
         `SELECT id,application_id,commit_sha,branch,state,created_at,requested_by,
-                github_installation_id,repository_full_name,deployment_type,source_path
+                github_installation_id,repository_full_name,deployment_type,source_path,
+                container_name,container_port,host_port,restart_policy,compose_project
          FROM deployments
          WHERE application_id=$1 AND idempotency_key=$2`,
         [applicationId,requestKey]
@@ -156,7 +177,7 @@ export async function deploymentRoutes(app:FastifyInstance){
     await membership(userId,orgId,'deployment.read');
     const rows=await pool.query(
       `SELECT d.id,d.application_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id,
-              d.repository_full_name,d.deployment_type,d.source_path
+              d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project
        FROM deployments d
        JOIN applications a ON a.id=d.application_id
        WHERE a.organization_id=$1
@@ -172,7 +193,7 @@ export async function deploymentRoutes(app:FastifyInstance){
     const {deploymentId}=z.object({deploymentId:uuid}).parse(request.params);
     const deployment=await pool.query(
       `SELECT d.id,d.application_id,a.organization_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id,
-              d.requested_by,d.repository_full_name,d.deployment_type,d.source_path
+              d.requested_by,d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project
        FROM deployments d
        JOIN applications a ON a.id=d.application_id
        WHERE d.id=$1`,
