@@ -22,6 +22,24 @@ const composeProject=z.object({
   running:z.number().int().nonnegative(),
   total:z.number().int().nonnegative()
 });
+
+const inspectSchema=z.object({
+  image:z.string().max(300),
+  created:z.string().max(100),
+  restartCount:z.number().int().nonnegative(),
+  mounts:z.array(z.object({type:z.string().max(32),source:z.string().max(500).optional(),destination:z.string().max(500),readOnly:z.boolean()})).max(100),
+  networks:z.array(z.string().max(200)).max(100),
+  ports:z.array(z.string().max(50)).max(100)
+});
+const statsSchema=z.object({
+  cpuPercent:z.number().min(0).max(10000),
+  memoryUsage:z.number().nonnegative(),
+  memoryLimit:z.number().nonnegative(),
+  networkRxBytes:z.number().nonnegative(),
+  networkTxBytes:z.number().nonnegative()
+});
+const logQuery=z.object({limit:z.coerce.number().int().min(1).max(500).default(200)}).strict();
+
 const lifecycleBody=z.object({
   action:z.enum(['start','stop','restart','pause','unpause','remove']),
   confirm:z.literal(true)
@@ -49,6 +67,32 @@ export async function dockerRoutes(app:FastifyInstance) {
     await authorizedServer(userId,serverId,'server.read');
     const result=await sendAgentCommand(serverId,'docker.listComposeProjects');
     return {projects:z.array(composeProject).max(100).parse(result)};
+  });
+
+
+  app.get('/servers/:serverId/docker/containers/:containerId/inspect',async request=>{
+    const {userId}=await authenticate(request);
+    const {serverId,containerId:target}=containerParams.parse(request.params);
+    await authorizedServer(userId,serverId,'server.read');
+    return inspectSchema.parse(await sendAgentCommand(serverId,'docker.inspectContainer',{containerId:target}));
+  });
+
+  app.get('/servers/:serverId/docker/containers/:containerId/stats',async request=>{
+    const {userId}=await authenticate(request);
+    const {serverId,containerId:target}=containerParams.parse(request.params);
+    await authorizedServer(userId,serverId,'server.read');
+    return statsSchema.parse(await sendAgentCommand(serverId,'docker.getContainerStats',{containerId:target}));
+  });
+
+  app.get('/servers/:serverId/docker/containers/:containerId/logs',async request=>{
+    const {userId}=await authenticate(request);
+    const {serverId,containerId:target}=containerParams.parse(request.params);
+    const {limit}=logQuery.parse(request.query);
+    const orgId=await authorizedServer(userId,serverId,'server.read');
+    await audit(orgId,userId,'logs.docker.read','container',target,request.ip,{serverId,limit});
+    return z.object({lines:z.array(z.string().max(4000)).max(500),truncated:z.boolean()}).parse(
+      await sendAgentCommand(serverId,'docker.tailContainerLogs',{containerId:target,limit})
+    );
   });
 
   app.post('/servers/:serverId/docker/containers/:containerId/action',async request=>{
