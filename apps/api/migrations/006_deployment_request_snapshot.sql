@@ -1,5 +1,4 @@
 ALTER TABLE deployments
-  ADD COLUMN requested_by uuid REFERENCES users(id) ON DELETE SET NULL,
   ADD COLUMN idempotency_key text,
   ADD COLUMN github_installation_id uuid REFERENCES github_installations(id) ON DELETE SET NULL,
   ADD COLUMN repository_full_name text,
@@ -9,6 +8,3 @@ ALTER TABLE deployments
 CREATE UNIQUE INDEX deployments_application_idempotency_idx
   ON deployments(application_id,idempotency_key)
   WHERE idempotency_key IS NOT NULL;
-
-CREATE INDEX deployments_application_created_idx
-  ON deployments(application_id,created_at DESC);
