@@ -72,3 +72,30 @@ export function resolveAgentStream(serverId:string,message:unknown):boolean{
   handler(parsed.data);if(parsed.data.done||parsed.data.error)unregisterAgentStream(serverId,parsed.data.subscriptionId);
   return true;
 }
+
+
+export type DeploymentProgressStage='cloning'|'building'|'deploying'|'health-checking';
+type DeploymentProgressMessage={deploymentId:string;stage:DeploymentProgressStage;message?:string};
+type DeploymentProgressHandler=(message:DeploymentProgressMessage)=>void|Promise<void>;
+const deploymentProgressHandlers=new Map<string,DeploymentProgressHandler>();
+
+export function registerDeploymentProgress(deploymentId:string,handler:DeploymentProgressHandler){
+  if(deploymentProgressHandlers.has(deploymentId))throw new Error('Deployment progress handler already registered');
+  deploymentProgressHandlers.set(deploymentId,handler);
+}
+export function unregisterDeploymentProgress(deploymentId:string){
+  deploymentProgressHandlers.delete(deploymentId);
+}
+export function resolveDeploymentProgress(message:unknown):boolean{
+  const parsed=z.object({
+    type:z.literal('deployment.progress'),
+    deploymentId:z.uuid(),
+    stage:z.enum(['cloning','building','deploying','health-checking']),
+    message:z.string().max(500).optional()
+  }).strict().safeParse(message);
+  if(!parsed.success)return false;
+  const handler=deploymentProgressHandlers.get(parsed.data.deploymentId);
+  if(!handler)return false;
+  void Promise.resolve(handler(parsed.data)).catch(()=>{});
+  return true;
+}
