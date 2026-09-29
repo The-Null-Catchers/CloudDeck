@@ -48,7 +48,7 @@ export async function streamRoutes(app:FastifyInstance){
     const closeStream=()=>{
       if(closed)return;closed=true;
       unregisterAgentStream(ticket.serverId,subscriptionId);
-      try{sendAgentEnvelope(ticket.serverId,{type:'stream.unsubscribe',subscriptionId});}catch{}
+      try{sendAgentEnvelope(ticket.serverId,{type:'stream.unsubscribe',subscriptionId});}catch{return;}
     };
     registerAgentStream(ticket.serverId,subscriptionId,message=>{
       if(socket.readyState!==1)return;
