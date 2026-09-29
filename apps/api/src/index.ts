@@ -8,6 +8,7 @@ import type { FastifyError } from 'fastify';
 import { authRoutes } from './auth.js';
 import { serverRoutes } from './servers.js';
 import { agentRoutes } from './agent.js';
+import {dockerRoutes} from './docker.js';
 import './security.js';
 import { startOfflineSweep } from './offline.js';
 export function buildApp() {
@@ -24,12 +25,13 @@ export function buildApp() {
   app.setErrorHandler((error: FastifyError,request,reply) => {
     const status = error instanceof ZodError ? 400 : ('statusCode' in error && typeof error.statusCode==='number' ? error.statusCode : 500);
     if (status>=500) request.log.error(error);
-    reply.code(status).send({error:{code: status===400?'VALIDATION_ERROR':status===401?'UNAUTHORIZED':status===403?'FORBIDDEN':status===404?'NOT_FOUND':'INTERNAL_ERROR',message:status>=500?'Internal server error':error.message}});
+    reply.code(status).send({error:{code: status===400?'VALIDATION_ERROR':status===401?'UNAUTHORIZED':status===403?'FORBIDDEN':status===404?'NOT_FOUND':status===503?'AGENT_UNAVAILABLE':status===504?'AGENT_TIMEOUT':'INTERNAL_ERROR',message:status>=500?'Internal server error':error.message}});
   });
   app.get('/health',async () => ({status:'ok'}));
   app.register(authRoutes,{prefix:'/api/v1/auth'});
   app.register(serverRoutes,{prefix:'/api/v1'});
   app.register(agentRoutes,{prefix:'/api/v1/agent'});
+  app.register(dockerRoutes,{prefix:'/api/v1'});
   return app;
 }
 if (process.env.NODE_ENV !== 'test') {
