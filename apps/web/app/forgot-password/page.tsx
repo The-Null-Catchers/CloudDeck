@@ -1,0 +1,4 @@
+'use client';
+import {useState} from 'react';
+import Link from 'next/link';
+export default function Forgot(){const [email,setEmail]=useState('');const [done,setDone]=useState(false);return <main className="auth-shell"><div className="auth-card"><h1>Reset password</h1>{done?<p>If this address belongs to an account, we sent a reset link.</p>:<form onSubmit={async e=>{e.preventDefault();await fetch(`${process.env.NEXT_PUBLIC_API_URL??'http://localhost:4000'}/api/v1/auth/forgot-password`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});setDone(true)}}><label>Email<input type="email" required value={email} onChange={e=>setEmail(e.target.value)}/></label><button className="primary full">Send reset link</button></form>}<p><Link href="/login">Back to sign in</Link></p></div></main>}

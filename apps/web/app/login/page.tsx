@@ -1,0 +1,11 @@
+'use client';
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { Activity, ArrowRight, ShieldCheck } from 'lucide-react';
+import { login,register } from '@/lib/api';
+export default function Login(){
+  const router=useRouter(); const [mode,setMode]=useState<'login'|'register'>('login'); const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false);
+  async function submit(e:React.FormEvent){e.preventDefault();setBusy(true);setError('');try{await (mode==='login'?login(email,password):register(email,password));router.push('/dashboard')}catch(err){setError(err instanceof Error?err.message:'Try again')}finally{setBusy(false)}}
+  return <main className="auth-shell"><div className="auth-card"><div className="brand"><span className="brand-icon"><Activity size={21}/></span>clouddeck<span className="brand-dot">.</span></div><div className="eyebrow">YOUR INFRASTRUCTURE, IN FOCUS</div><h1>{mode==='login'?'Welcome back':'Create your workspace'}</h1><p className="muted">Keep your servers and operations in one place.</p><form onSubmit={submit}><label>Email address<input type="email" autoComplete="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.com"/></label><label>Password<input type="password" autoComplete={mode==='login'?'current-password':'new-password'} minLength={12} required value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 12 characters"/></label>{error&&<p className="form-error" role="alert">{error}</p>}<button className="primary full" disabled={busy}>{busy?'Please wait…':mode==='login'?'Sign in':'Create account'} <ArrowRight size={16}/></button></form>{mode==='login'&&<p className="auth-toggle"><Link href="/forgot-password">Forgot password?</Link></p>}<p className="auth-toggle">{mode==='login'?'New to CloudDeck?':'Already have an account?'} <button onClick={()=>setMode(mode==='login'?'register':'login')}>{mode==='login'?'Create account':'Sign in'}</button></p><div className="auth-foot"><ShieldCheck size={15}/> Secured with encrypted sessions and role based access</div></div></main>
+}

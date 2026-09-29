@@ -1,0 +1,40 @@
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
+import websocket from '@fastify/websocket';
+import { ZodError } from 'zod';
+import type { FastifyError } from 'fastify';
+import { authRoutes } from './auth.js';
+import { serverRoutes } from './servers.js';
+import { agentRoutes } from './agent.js';
+import './security.js';
+import { startOfflineSweep } from './offline.js';
+export function buildApp() {
+  const app = Fastify({logger:{redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie','body.password','body.token','body.credential']},bodyLimit:65536,trustProxy:false});
+  app.register(cors,{origin:process.env.APP_ORIGIN ?? 'http://localhost:3000',credentials:true});
+  app.register(cookie);
+  app.register(rateLimit,{max:100,timeWindow:'1 minute'});
+  app.register(websocket);
+  app.addHook('onRequest',async (request,reply) => {
+    if (!['GET','HEAD','OPTIONS'].includes(request.method) && request.headers.origin && request.headers.origin !== (process.env.APP_ORIGIN ?? 'http://localhost:3000')) {
+      reply.code(403).send({error:{code:'ORIGIN_DENIED',message:'Origin denied'}});
+    }
+  });
+  app.setErrorHandler((error: FastifyError,request,reply) => {
+    const status = error instanceof ZodError ? 400 : ('statusCode' in error && typeof error.statusCode==='number' ? error.statusCode : 500);
+    if (status>=500) request.log.error(error);
+    reply.code(status).send({error:{code: status===400?'VALIDATION_ERROR':status===401?'UNAUTHORIZED':status===403?'FORBIDDEN':status===404?'NOT_FOUND':'INTERNAL_ERROR',message:status>=500?'Internal server error':error.message}});
+  });
+  app.get('/health',async () => ({status:'ok'}));
+  app.register(authRoutes,{prefix:'/api/v1/auth'});
+  app.register(serverRoutes,{prefix:'/api/v1'});
+  app.register(agentRoutes,{prefix:'/api/v1/agent'});
+  return app;
+}
+if (process.env.NODE_ENV !== 'test') {
+  const app=buildApp();
+  await app.listen({host:'0.0.0.0',port:Number(process.env.PORT ?? 4000)});
+  const stopSweep=startOfflineSweep();
+  app.addHook('onClose',async()=>stopSweep());
+}

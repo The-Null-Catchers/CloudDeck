@@ -1,0 +1,36 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: {POSTGRES_USER: clouddeck, POSTGRES_PASSWORD: testpass, POSTGRES_DB: clouddeck}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U clouddeck" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://clouddeck:testpass@localhost:5432/clouddeck
+      JWT_SECRET: ci-test-secret-at-least-thirty-two-characters
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm}
+      - run: npm ci
+      - run: npm run migrate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+  agent:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: services/agent}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.23', cache: false}
+      - run: go mod download
+      - run: go test ./...
+      - run: go build ./...

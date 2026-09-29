@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: clouddeck
+      POSTGRES_USER: clouddeck
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clouddeck"]
+      interval: 10s
+      retries: 5
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redis_data:/data]
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgres://clouddeck:${POSTGRES_PASSWORD}@postgres:5432/clouddeck
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      APP_ORIGIN: ${APP_ORIGIN:?set APP_ORIGIN}
+      NODE_ENV: production
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      MAIL_FROM: CloudDeck <noreply@localhost>
+    ports: ["127.0.0.1:4000:4000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports: ["127.0.0.1:8025:8025"]
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:?set PUBLIC_API_URL}
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on: [api]
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,23 @@
+{
+  "name": "clouddeck",
+  "private": true,
+  "packageManager": "npm@11.9.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @clouddeck/api",
+    "dev:web": "npm run dev -w @clouddeck/web",
+    "build": "npm run build -w @clouddeck/shared && npm run build -w @clouddeck/api && npm run build -w @clouddeck/web",
+    "typecheck": "npm run build -w @clouddeck/shared && npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w @clouddeck/api",
+    "migrate": "npm run migrate -w @clouddeck/api",
+    "lint": "eslint apps packages --ext .ts,.tsx"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "typescript-eslint": "^8.71.0"
+  }
+}
