@@ -16,6 +16,10 @@ export function attachAgent(serverId:string,socket:WebSocket):boolean {
   active.set(serverId,{socket,pending:new Map()});
   return true;
 }
+export function isAgentConnected(serverId:string){
+  const connection=active.get(serverId);
+  return Boolean(connection && connection.socket.readyState===1);
+}
 export function detachAgent(serverId:string,socket:WebSocket) {
   const connection=active.get(serverId);
   if(!connection || connection.socket!==socket)return;
@@ -33,12 +37,13 @@ export function resolveAgentResult(serverId:string,message:unknown):boolean {
   else entry.reject(new Error(parsed.data.error));
   return true;
 }
-export function sendAgentCommand(serverId:string,action:AgentAction,payload:object={}):Promise<unknown> {
+export function sendAgentCommand(serverId:string,action:AgentAction,payload:object={},timeoutMs=15_000):Promise<unknown> {
   const connection=active.get(serverId);
   if(!connection || connection.socket.readyState!==1)throw Object.assign(new Error('Agent not connected'),{statusCode:503});
   const requestId=randomUUID();
   return new Promise((resolve,reject)=>{
-    const timer=setTimeout(()=>{connection.pending.delete(requestId);reject(Object.assign(new Error('Agent command timed out'),{statusCode:504}));},15_000);
+    const timeout=Math.max(1_000,Math.min(30*60_000,Math.trunc(timeoutMs)));
+    const timer=setTimeout(()=>{connection.pending.delete(requestId);reject(Object.assign(new Error('Agent command timed out'),{statusCode:504}));},timeout);
     connection.pending.set(requestId,{resolve,reject,timer});
     connection.socket.send(JSON.stringify({type:'command',requestId,action,payload}),error=>{
       if(error){clearTimeout(timer);connection.pending.delete(requestId);reject(error);}
