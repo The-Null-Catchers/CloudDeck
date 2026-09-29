@@ -43,6 +43,7 @@ async function recordDelivery(deliveryId:string,eventName:string,installationId:
 }
 
 export async function githubWebhookRoutes(app:FastifyInstance){
+  app.removeContentTypeParser('application/json');
   app.addContentTypeParser(
     'application/json',
     {parseAs:'buffer',bodyLimit:512*1024},
