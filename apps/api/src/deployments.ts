@@ -125,6 +125,13 @@ export async function deploymentRoutes(app:FastifyInstance){
            VALUES($1,'queued','Deployment requested and source commit pinned')`,
           [inserted.rows[0].id]
         );
+        await audit(sourceConfig.organization_id,userId,'deployment.request','deployment',inserted.rows[0].id,request.ip,{
+          applicationId,
+          repository:sourceConfig.repository_full_name,
+          branch:sourceConfig.branch,
+          commitSha:source.commitSha,
+          deploymentType:sourceConfig.deployment_type
+        },db);
         return {deployment:inserted.rows[0],created:true};
       }
       const existing=await db.query(
@@ -138,16 +145,7 @@ export async function deploymentRoutes(app:FastifyInstance){
       return {deployment:existing.rows[0],created:false};
     });
 
-    if(created.created){
-      await audit(sourceConfig.organization_id,userId,'deployment.request','deployment',created.deployment.id,request.ip,{
-        applicationId,
-        repository:sourceConfig.repository_full_name,
-        branch:sourceConfig.branch,
-        commitSha:source.commitSha,
-        deploymentType:sourceConfig.deployment_type
-      });
-      reply.code(201);
-    }
+    if(created.created)reply.code(201);
     return created.deployment;
   });
 
