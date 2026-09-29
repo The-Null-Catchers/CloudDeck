@@ -20,10 +20,10 @@ export async function authenticate(request: FastifyRequest) {
   } catch { throw Object.assign(new Error('Invalid or revoked session'), {statusCode: 401}); }
 }
 export const permissions = {
-  viewer: new Set(['server.read', 'metrics.read', 'audit.read']),
-  operator: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'terminal.access']),
-  admin: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage', 'terminal.access']),
-  owner: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage', 'org.delete', 'terminal.access'])
+  viewer: new Set(['server.read', 'metrics.read', 'audit.read', 'deployment.read']),
+  operator: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'terminal.access', 'deployment.read', 'deployment.manage']),
+  admin: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage', 'terminal.access', 'deployment.read', 'deployment.manage']),
+  owner: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage', 'org.delete', 'terminal.access', 'deployment.read', 'deployment.manage'])
 } as const;
 export function can(role: keyof typeof permissions, permission: string) { return permissions[role].has(permission); }
 export async function membership(userId: string, orgId: string, permission: string) {
