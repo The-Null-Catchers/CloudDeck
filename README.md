@@ -14,6 +14,7 @@ CloudDeck is a multi-server operations and observability platform that combines 
 - systemd service inventory plus audited start/stop/restart actions. Unit names are strictly validated and no shell command endpoint exists.
 - Bounded systemd journal snapshots plus realtime Docker/systemd log subscriptions using one-time WebSocket tickets, cancellation, and capped in-memory UI buffers.
 - Docker Compose local stack and GitHub Actions checks for Node and Go.
+- Deployment lifecycle state machine with guarded transitions, event history, lifecycle timestamps, RBAC-protected read APIs, and rollback-state support.
 
 ## Architecture
 
@@ -73,7 +74,7 @@ See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [arc
 2. Agent: pairing, heartbeat, telemetry, metric aggregation — functional baseline; distributed connection routing still pending.
 3. Operations: Docker lifecycle/inspection, Compose service controls, systemd management, bounded snapshots, and realtime Docker/systemd logs — functional baseline.
 4. Browser terminal — dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, a 30-minute limit, and xterm.js server-detail UI with automatic fitting/resize.
-5. GitHub App, deployment state machine, health activation and rollback.
+5. Deployments — guarded state machine/read APIs implemented; next: GitHub App source connection, BullMQ execution, health activation, and rollback orchestration.
 6. Health checks, alert rules and email/in-app notifications.
 7. Caddy/Nginx domains, encrypted secrets, verified backups and restore.
 8. Flutter monitoring and emergency-operation mobile app.
