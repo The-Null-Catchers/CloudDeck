@@ -162,6 +162,29 @@ export async function verifyGitHubSource(orgId:string,connectionId:string,reposi
   return {commitSha:branchData.commit.sha,sourcePath:file.path,connectionId:installation.id};
 }
 
+export async function verifyGitHubCommitSource(orgId:string,connectionId:string,repositoryFullName:string,commitSha:string,sourcePath:string){
+  const parts=repositoryFullName.split('/');
+  if(parts.length!==2||!/^[A-Za-z0-9-]{1,100}$/.test(parts[0])||!/^[A-Za-z0-9_.-]{1,100}$/.test(parts[1])){
+    throw Object.assign(new Error('Invalid GitHub repository name'),{statusCode:400});
+  }
+  if(!/^[a-f0-9]{40}$/i.test(commitSha))throw Object.assign(new Error('Invalid GitHub commit SHA'),{statusCode:400});
+  const pathParts=sourcePath.split('/');
+  if(!sourcePath||sourcePath.startsWith('/')||sourcePath.length>240||pathParts.some(part=>!part||part==='.'||part==='..'||!/^[A-Za-z0-9._-]+$/.test(part))){
+    throw Object.assign(new Error('Invalid deployment source path'),{statusCode:400});
+  }
+  const installation=await linkedInstallation(orgId,connectionId);
+  const [owner,repo]=parts;
+  const encodedPath=pathParts.map(encodeURIComponent).join('/');
+  const fileResponse=await installationRequest(
+    installation.installationId,
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?ref=${encodeURIComponent(commitSha)}`
+  );
+  if(fileResponse.status===404)throw Object.assign(new Error('Deployment source file was not found at the pushed commit'),{statusCode:400});
+  if(!fileResponse.ok)throw Object.assign(new Error('Unable to verify pushed deployment source file'),{statusCode:502});
+  const file=z.object({type:z.literal('file'),path:z.string(),sha:z.string()}).parse(await fileResponse.json());
+  return {commitSha,sourcePath:file.path,connectionId:installation.id};
+}
+
 async function findAccessibleInstallation(token:string,installationId:number){
   for(let page=1;page<=10;page++){
     const response=await fetch(`https://api.github.com/user/installations?per_page=100&page=${page}`,{
