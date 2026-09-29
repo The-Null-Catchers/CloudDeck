@@ -181,19 +181,24 @@ func deployComposeProject(ctx context.Context,root string,p deploymentExecutePay
   if err!=nil{return result,fmt.Errorf("Compose service %s image preparation failed",name)}
  }
  previous,err:=existingComposeContainers(project);if err!=nil{return result,err}
- for service,id:=range previous{
-  if res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/stop?t=15",nil);err!=nil{return result,err}else if err:=expectDockerStatus(res,204,304);err!=nil{return result,err}
-  backup:=project+"-"+service+"-clouddeck-prev-"+strings.ToLower(p.DeploymentID[:8]);if len(backup)>127{backup=backup[:127]}
-  if res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/rename?name="+url.QueryEscape(backup),nil);err!=nil{return result,err}else if err:=expectDockerStatus(res,204);err!=nil{return result,err}
- }
- created:=map[string]string{}
- restore:=func(){
-  for _,id:=range created{if res,err:=dockerJSON(context.Background(),client,http.MethodDelete,"/containers/"+url.PathEscape(id)+"?force=1",nil);err==nil{_ = expectDockerStatus(res,204)}}
-  for service,id:=range previous{
+ prepared:=map[string]string{}
+ restorePrepared:=func(){
+  for service,id:=range prepared{
    name:=project+"-"+service+"-1"
    if res,err:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/rename?name="+url.QueryEscape(name),nil);err==nil{_ = expectDockerStatus(res,204)}
    if res,err:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/start",nil);err==nil{_ = expectDockerStatus(res,204,304)}
   }
+ }
+ for service,id:=range previous{
+  if res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/stop?t=15",nil);err!=nil{restorePrepared();return result,err}else if err:=expectDockerStatus(res,204,304);err!=nil{restorePrepared();return result,err}
+  backup:=project+"-"+service+"-clouddeck-prev-"+strings.ToLower(p.DeploymentID[:8]);if len(backup)>127{backup=backup[:127]}
+  if res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/rename?name="+url.QueryEscape(backup),nil);err!=nil{restorePrepared();return result,err}else if err:=expectDockerStatus(res,204);err!=nil{restorePrepared();return result,err}
+  prepared[service]=id
+ }
+ created:=map[string]string{}
+ restore:=func(){
+  for _,id:=range created{if res,err:=dockerJSON(context.Background(),client,http.MethodDelete,"/containers/"+url.PathEscape(id)+"?force=1",nil);err==nil{_ = expectDockerStatus(res,204)}}
+  restorePrepared()
  }
  emitDeploymentProgress(write,p.DeploymentID,"deploying","Creating and starting Compose services")
  for _,name:=range order{
