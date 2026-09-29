@@ -32,3 +32,27 @@ func TestValidateDeploymentPayloadRejectsUnsafeValues(t *testing.T){
  }
  for i,mutate:=range tests{p:=validDeploymentPayload();mutate(&p);if validateDeploymentPayload(p)==nil{t.Fatalf("case %d should fail",i)}}
 }
+
+
+func validRollbackPayload()deploymentRollbackPayload{
+ return deploymentRollbackPayload{
+  DeploymentID:"123e4567-e89b-12d3-a456-426614174000",
+  ContainerName:"clouddeck-api",
+  CurrentContainerID:"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  PreviousContainerID:"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+ }
+}
+
+func TestValidateRollbackPayload(t *testing.T){
+ p:=validRollbackPayload()
+ if err:=validateRollbackPayload(p);err!=nil{t.Fatalf("expected valid rollback payload: %v",err)}
+}
+
+func TestValidateRollbackPayloadRejectsUnsafeTargets(t *testing.T){
+ tests:=[]func(*deploymentRollbackPayload){
+  func(p *deploymentRollbackPayload){p.ContainerName="api;rm"},
+  func(p *deploymentRollbackPayload){p.CurrentContainerID="bad"},
+  func(p *deploymentRollbackPayload){p.PreviousContainerID=p.CurrentContainerID},
+ }
+ for i,mutate:=range tests{p:=validRollbackPayload();mutate(&p);if validateRollbackPayload(p)==nil{t.Fatalf("case %d should fail",i)}}
+}
