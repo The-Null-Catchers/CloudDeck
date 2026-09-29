@@ -40,7 +40,9 @@ type containerSummary struct {
  Status string `json:"status"`
  Ports []dockerPort `json:"ports"`
 }
+
 var dockerID = regexp.MustCompile(`^[a-fA-F0-9]{12,64}$`)
+
 func dockerClient() (*http.Client,error) {
  socket:=os.Getenv("CLOUDDECK_DOCKER_SOCKET")
  if socket=="" {return nil,errors.New("Docker integration disabled on this agent")}
@@ -82,6 +84,12 @@ func restartContainer(id string) error {
  response,err:=dockerRequest(http.MethodPost,"/containers/"+id+"/restart?t=10");if err!=nil{return err};defer response.Body.Close()
  return nil
 }
+
+func decodeStrict(payload json.RawMessage,target any) error {
+ decoder:=json.NewDecoder(strings.NewReader(string(payload)));decoder.DisallowUnknownFields()
+ return decoder.Decode(target)
+}
+
 func executeCommand(command agentCommand) commandResult {
  result:=commandResult{Type:"command.result",RequestID:command.RequestID}
  if command.Type!="command" || command.RequestID==""{result.Error="Invalid command";return result}
@@ -91,10 +99,24 @@ func executeCommand(command agentCommand) commandResult {
   data,err:=listContainers();if err!=nil{result.Error=err.Error();return result};result.Data=data
  case "docker.restartContainer":
   var payload struct{ContainerID string `json:"containerId"`}
-  decoder:=json.NewDecoder(strings.NewReader(string(command.Payload)));decoder.DisallowUnknownFields()
-  if err:=decoder.Decode(&payload);err!=nil || !dockerID.MatchString(payload.ContainerID){result.Error="Invalid container ID";return result}
+  if err:=decodeStrict(command.Payload,&payload);err!=nil || !dockerID.MatchString(payload.ContainerID){result.Error="Invalid container ID";return result}
   if err:=restartContainer(payload.ContainerID);err!=nil{result.Error=err.Error();return result}
   result.Data=map[string]bool{"restarted":true}
+ case "systemd.listServices":
+  if len(command.Payload)>0 && string(command.Payload)!="{}" {result.Error="Unexpected payload";return result}
+  data,err:=listSystemdServices();if err!=nil{result.Error=err.Error();return result};result.Data=data
+ case "systemd.startService","systemd.stopService","systemd.restartService":
+  var payload struct{ServiceName string `json:"serviceName"`}
+  if err:=decodeStrict(command.Payload,&payload);err!=nil || !systemdServiceName.MatchString(payload.ServiceName){result.Error="Invalid service name";return result}
+  operation:=strings.TrimPrefix(command.Action,"systemd.")
+  operation=strings.TrimSuffix(operation,"Service")
+  if err:=controlSystemdService(payload.ServiceName,operation);err!=nil{result.Error=err.Error();return result}
+  result.Data=map[string]bool{"ok":true}
+ case "systemd.tailLogs":
+  var payload struct{ServiceName string `json:"serviceName"`;Limit int `json:"limit"`}
+  if err:=decodeStrict(command.Payload,&payload);err!=nil || !systemdServiceName.MatchString(payload.ServiceName) || payload.Limit<1 || payload.Limit>500 {result.Error="Invalid log request";return result}
+  lines,truncated,err:=tailSystemdLogs(payload.ServiceName,payload.Limit);if err!=nil{result.Error=err.Error();return result}
+  result.Data=map[string]any{"lines":lines,"truncated":truncated}
  default:result.Error="Action not allowed";return result
  }
  result.Success=true
