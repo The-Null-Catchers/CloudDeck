@@ -205,19 +205,23 @@ func tailContainerLogs(id string,limit int)([]string,bool,error){
 }
 
 
-func composeServiceContainers(project,service string)([]string,error){
+func composeServiceContainers(project,service string)([]containerSummary,error){
  if !composeName.MatchString(project)||!composeName.MatchString(service){return nil,errors.New("Invalid Compose project or service")}
  containers,err:=listContainers();if err!=nil{return nil,err}
- ids:=[]string{}
+ matches:=[]containerSummary{}
  for _,container:=range containers{
-  if container.ComposeProject==project&&container.ComposeService==service{ids=append(ids,container.ID)}
+  if container.ComposeProject==project&&container.ComposeService==service{matches=append(matches,container)}
  }
- if len(ids)==0{return nil,errors.New("Compose service not found")}
- return ids,nil
+ if len(matches)==0{return nil,errors.New("Compose service not found")}
+ return matches,nil
 }
 func composeServiceAction(project,service,action string)error{
- ids,err:=composeServiceContainers(project,service);if err!=nil{return err}
- for _,id:=range ids{if err:=containerAction(id,action);err!=nil{return err}}
+ containers,err:=composeServiceContainers(project,service);if err!=nil{return err}
+ for _,container:=range containers{
+  if action=="start"&&container.State=="running"{continue}
+  if action=="stop"&&container.State!="running"&&container.State!="paused"{continue}
+  if err:=containerAction(container.ID,action);err!=nil{return err}
+ }
  return nil
 }
 
