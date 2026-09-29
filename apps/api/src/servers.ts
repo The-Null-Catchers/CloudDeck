@@ -52,6 +52,12 @@ export async function serverRoutes(app: FastifyInstance) {
     reply.code(201);
     return {...server,pairingToken:pairing,pairingExpiresIn:600};
   });
+  app.get('/servers/:serverId', async request => {
+    const {userId}=await authenticate(request);const {serverId}=z.object({serverId:id}).parse(request.params);
+    const result=await pool.query('SELECT id,organization_id,name,hostname,provider,region,operating_system,architecture,agent_version,status,last_seen_at,tags FROM servers WHERE id=$1',[serverId]);
+    if (!result.rowCount) throw Object.assign(new Error('Server not found'),{statusCode:404});
+    await membership(userId,result.rows[0].organization_id,'server.read');return result.rows[0];
+  });
   app.get('/servers/:serverId/metrics', async request => {
     const {userId} = await authenticate(request);
     const {serverId} = z.object({serverId:id}).parse(request.params);

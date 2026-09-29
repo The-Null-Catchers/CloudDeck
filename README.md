@@ -6,7 +6,7 @@ CloudDeck brings server inventory, operational status, and agent metrics into on
 
 ## Implemented
 
-- Next.js responsive dashboard with a clearly labeled four-server demo preview, sign in, registration, real workspace listing, server creation, and pairing token display.
+- Next.js responsive dashboard with a clearly labeled four-server demo preview, sign in, registration, real workspace listing, server creation, server metrics detail, and pairing token display.
 - Fastify API with PostgreSQL migrations, Argon2id passwords, short-lived JWTs, rotating/revocable refresh cookie, personal and team workspaces, role authorization, audit records, session listing/revocation, and email verification/password reset through SMTP.
 - Go Linux agent with outbound authenticated WebSocket, one-time 10-minute pairing, heartbeat samples, CPU/RAM/disk/load/network telemetry, reconnect, and 0600 credential file. API aggregates metric samples into minute buckets.
 - Docker Compose for web, API, PostgreSQL, Redis and GitHub Actions checks for Node and Go.
