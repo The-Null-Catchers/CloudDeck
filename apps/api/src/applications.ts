@@ -108,6 +108,29 @@ export async function applicationRoutes(app:FastifyInstance){
     return application;
   });
 
+  app.put('/applications/:applicationId/auto-deploy',async request=>{
+    const {userId}=await authenticate(request);
+    const {applicationId}=z.object({applicationId:uuid}).parse(request.params);
+    const {enabled}=z.object({enabled:z.boolean()}).strict().parse(request.body);
+    const current=await pool.query(
+      `SELECT id,organization_id,deployment_type,container_name,compose_project
+       FROM applications
+       WHERE id=$1`,
+      [applicationId]
+    );
+    if(!current.rowCount)throw Object.assign(new Error('Application not found'),{statusCode:404});
+    const row=current.rows[0];
+    await membership(userId,row.organization_id,'deployment.manage');
+    const runtimeReady=row.deployment_type==='dockerfile'?Boolean(row.container_name):row.deployment_type==='compose'?Boolean(row.compose_project):false;
+    if(enabled&&!runtimeReady)throw Object.assign(new Error('Application runtime configuration is required before enabling auto-deploy'),{statusCode:409});
+    const updated=await pool.query(
+      'UPDATE applications SET auto_deploy=$2 WHERE id=$1 RETURNING id,auto_deploy',
+      [applicationId,enabled]
+    );
+    await audit(row.organization_id,userId,enabled?'application.auto_deploy.enabled':'application.auto_deploy.disabled','application',applicationId,request.ip);
+    return updated.rows[0];
+  });
+
   app.put('/applications/:applicationId/runtime',async request=>{
     const {userId}=await authenticate(request);
     const {applicationId}=z.object({applicationId:uuid}).parse(request.params);
@@ -149,7 +172,7 @@ export async function applicationRoutes(app:FastifyInstance){
     await membership(userId,orgId,'deployment.read');
     const rows=await pool.query(
       `SELECT a.id,a.server_id,a.name,a.github_installation_id,a.repository_full_name,a.branch,a.deployment_type,a.source_path,
-              a.container_name,a.container_port,a.host_port,a.restart_policy,a.compose_project,a.created_at,
+              a.container_name,a.container_port,a.host_port,a.restart_policy,a.compose_project,a.auto_deploy,a.created_at,
               s.name AS server_name,s.status AS server_status,g.account_login AS github_account
        FROM applications a
        LEFT JOIN servers s ON s.id=a.server_id
