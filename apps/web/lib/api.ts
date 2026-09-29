@@ -24,3 +24,16 @@ export async function register(email:string,password:string) {
   if (!response.ok) throw new Error((await response.json()).error?.message ?? 'Registration failed');
   accessToken=(await response.json()).accessToken;
 }
+
+export type LogStreamEvent={type:'ready'|'log';subscriptionId:string;line?:string;error?:string;done?:boolean};
+export async function openLogStream(serverId:string,source:'docker'|'systemd',target:string,onEvent:(event:LogStreamEvent)=>void,tail=100){
+  const result=await api<{ticket:string;expiresInSeconds:number}>('/servers/'+serverId+'/logs/ticket',{method:'POST',body:JSON.stringify({source,target,tail})});
+  const endpoint=new URL('/api/v1/logs/stream',base);
+  endpoint.protocol=endpoint.protocol==='https:'?'wss:':'ws:';
+  endpoint.searchParams.set('ticket',result.ticket);
+  const socket=new WebSocket(endpoint.toString());
+  socket.onmessage=event=>{
+    try{onEvent(JSON.parse(event.data) as LogStreamEvent)}catch{socket.close(1007,'Invalid stream payload')}
+  };
+  return socket;
+}
