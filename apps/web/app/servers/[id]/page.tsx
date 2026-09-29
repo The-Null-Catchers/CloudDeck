@@ -1,7 +1,7 @@
 'use client';
 import {useEffect,useState} from 'react';
 import {useParams,useRouter} from 'next/navigation';
-import {ArrowLeft,Activity,Server,Cpu,MemoryStick,HardDrive,Network,Clock3,ShieldCheck,Boxes,RotateCcw} from 'lucide-react';
+import {ArrowLeft,Activity,Server,Cpu,MemoryStick,HardDrive,Network,Clock3,ShieldCheck} from 'lucide-react';
 import {api} from '@/lib/api';
 import {DockerPanel} from './docker-panel';
 type ServerInfo={id:string;organization_id:string;name:string;hostname:string|null;provider:string|null;region:string|null;operating_system:string|null;architecture:string|null;agent_version:string|null;status:string;last_seen_at:string|null;tags:string[]};
