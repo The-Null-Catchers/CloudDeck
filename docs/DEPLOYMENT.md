@@ -113,3 +113,25 @@ If Redis is unavailable when a deployment is created:
 When queue insertion succeeds the response reports `dispatch: "enqueued"`.
 
 This change provides durable dispatch and recovery only. State execution remains separate from queue delivery: a deployment is never advanced to `cloning`, `building`, or `successful` merely because BullMQ accepted the job.
+
+
+## Dockerfile deployment execution
+
+BullMQ jobs are now consumed by an in-process deployment worker so the worker can reuse the authenticated outbound Agent WebSocket registry. This is intentionally a single-API-instance design; horizontal execution routing remains a future Redis/gateway concern.
+
+For Dockerfile applications, the worker:
+
+1. verifies the deployment is still `queued`;
+2. waits/retries while the target Agent is disconnected;
+3. mints a short-lived GitHub App installation token;
+4. transitions to `cloning`;
+5. sends one allowlisted `deployment.execute` command over the authenticated Agent WebSocket;
+6. persists typed progress as `building`, `deploying`, and `health-checking`;
+7. records the resulting image/container IDs;
+8. marks the deployment `successful` only after the Agent reports the new container running and healthy (when Docker health metadata exists).
+
+The GitHub installation token is ephemeral, is not written to PostgreSQL, BullMQ, deployment events, or logs, and exists only in the encrypted Agent WebSocket command payload.
+
+The Agent downloads the pinned commit archive, rejects unsafe archive entries, applies file-count/size limits, builds through the Docker Engine API, and activates the configured runtime target. Existing containers are stopped and renamed before replacement. If create/start/readiness fails, the Agent removes the replacement and restores the previous container name/state before reporting failure. Successful deployments retain the previous container ID for the rollback workflow.
+
+Automated Docker Compose execution is deliberately rejected with HTTP 409 for now. CloudDeck will add a Compose-spec-aware executor separately rather than falling back to unrestricted shell execution or ad-hoc `docker compose` CLI calls.
