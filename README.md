@@ -72,7 +72,7 @@ See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [arc
 1. Foundation: auth, organizations, database, dashboard — functional baseline.
 2. Agent: pairing, heartbeat, telemetry, metric aggregation — functional baseline; distributed connection routing still pending.
 3. Operations: Docker lifecycle/inspection, Compose service controls, systemd management, bounded snapshots, and realtime Docker/systemd logs — functional baseline.
-4. Browser terminal — backend/agent session protocol now includes dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, and a 30-minute limit. Next: xterm.js web UI.
+4. Browser terminal — dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, a 30-minute limit, and xterm.js server-detail UI with automatic fitting/resize.
 5. GitHub App, deployment state machine, health activation and rollback.
 6. Health checks, alert rules and email/in-app notifications.
 7. Caddy/Nginx domains, encrypted secrets, verified backups and restore.
