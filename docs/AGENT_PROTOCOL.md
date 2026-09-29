@@ -88,3 +88,14 @@ Terminal access is intentionally separate from the allowlisted command protocol.
 Terminal contents are never persisted by CloudDeck. Audit records contain actor, server, timestamps, session ID, and close reason only. The shell is started directly through a PTY, not through the typed command dispatcher. The agent accepts an absolute local shell path via `CLOUDDECK_TERMINAL_SHELL` (default `/bin/bash`).
 
 Terminal tickets and routing are process-local in this phase. Horizontal API scaling requires distributed session routing before multiple API replicas are enabled.
+
+
+## Deployment execution
+
+`deployment.execute` is an explicit allowlisted long-running action; it is not a generic shell command. Its payload is strictly validated and supports Dockerfile deployments only in this phase.
+
+The Agent emits bounded `deployment.progress` envelopes for `cloning`, `building`, `deploying`, and `health-checking`. The API maps those envelopes onto the guarded deployment state machine.
+
+Source handling is defensive: GitHub archives are pinned to the requested commit SHA, path traversal and link/device entries are rejected, extraction is bounded, and the configured Dockerfile must exist after extraction. Image build and container lifecycle operations use the Docker Engine Unix socket directly.
+
+Replacement is rollback-aware. The current named container is stopped and renamed before activation of the replacement. If replacement activation or readiness fails, the Agent removes the new container and restores the previous one. Terminal access remains the only arbitrary-shell path and is governed by its dedicated session protocol.

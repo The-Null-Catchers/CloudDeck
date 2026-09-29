@@ -97,7 +97,7 @@ async function githubAppJwt(){
     .setIssuer(clientId)
     .sign(key);
 }
-async function createInstallationToken(installationId:number){
+export async function createInstallationToken(installationId:number){
   const jwt=await githubAppJwt();
   const response=await fetch(`https://api.github.com/app/installations/${installationId}/access_tokens`,{
     method:'POST',

@@ -95,6 +95,7 @@ export async function deploymentRoutes(app:FastifyInstance){
         ? Boolean(sourceConfig.compose_project)
         : false;
     if(!runtimeReady)throw Object.assign(new Error('Application runtime configuration is required before deployment'),{statusCode:409});
+    if(sourceConfig.deployment_type==='compose')throw Object.assign(new Error('Automated Docker Compose deployment execution is not available yet'),{statusCode:409});
 
     const source=await verifyGitHubSource(
       sourceConfig.organization_id,
@@ -191,7 +192,7 @@ export async function deploymentRoutes(app:FastifyInstance){
     await membership(userId,orgId,'deployment.read');
     const rows=await pool.query(
       `SELECT d.id,d.application_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id,
-              d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project
+              d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project,d.image_ref,d.container_id,d.previous_container_id
        FROM deployments d
        JOIN applications a ON a.id=d.application_id
        WHERE a.organization_id=$1

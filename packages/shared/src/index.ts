@@ -19,7 +19,8 @@ export const allowedActions = [
   'systemd.startService',
   'systemd.stopService',
   'systemd.restartService',
-  'systemd.tailLogs'
+  'systemd.tailLogs',
+  'deployment.execute'
 ] as const;
 export type AgentAction = typeof allowedActions[number];
 export interface ApiError { error: { code: string; message: string } }

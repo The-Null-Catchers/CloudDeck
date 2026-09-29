@@ -16,6 +16,10 @@ export function attachAgent(serverId:string,socket:WebSocket):boolean {
   active.set(serverId,{socket,pending:new Map()});
   return true;
 }
+export function isAgentConnected(serverId:string){
+  const connection=active.get(serverId);
+  return Boolean(connection && connection.socket.readyState===1);
+}
 export function detachAgent(serverId:string,socket:WebSocket) {
   const connection=active.get(serverId);
   if(!connection || connection.socket!==socket)return;
@@ -33,12 +37,13 @@ export function resolveAgentResult(serverId:string,message:unknown):boolean {
   else entry.reject(new Error(parsed.data.error));
   return true;
 }
-export function sendAgentCommand(serverId:string,action:AgentAction,payload:object={}):Promise<unknown> {
+export function sendAgentCommand(serverId:string,action:AgentAction,payload:object={},timeoutMs=15_000):Promise<unknown> {
   const connection=active.get(serverId);
   if(!connection || connection.socket.readyState!==1)throw Object.assign(new Error('Agent not connected'),{statusCode:503});
   const requestId=randomUUID();
   return new Promise((resolve,reject)=>{
-    const timer=setTimeout(()=>{connection.pending.delete(requestId);reject(Object.assign(new Error('Agent command timed out'),{statusCode:504}));},15_000);
+    const timeout=Math.max(1_000,Math.min(30*60_000,Math.trunc(timeoutMs)));
+    const timer=setTimeout(()=>{connection.pending.delete(requestId);reject(Object.assign(new Error('Agent command timed out'),{statusCode:504}));},timeout);
     connection.pending.set(requestId,{resolve,reject,timer});
     connection.socket.send(JSON.stringify({type:'command',requestId,action,payload}),error=>{
       if(error){clearTimeout(timer);connection.pending.delete(requestId);reject(error);}
@@ -65,5 +70,32 @@ export function resolveAgentStream(serverId:string,message:unknown):boolean{
   if(!parsed.success)return false;
   const handler=streams.get(serverId)?.get(parsed.data.subscriptionId);if(!handler)return false;
   handler(parsed.data);if(parsed.data.done||parsed.data.error)unregisterAgentStream(serverId,parsed.data.subscriptionId);
+  return true;
+}
+
+
+export type DeploymentProgressStage='cloning'|'building'|'deploying'|'health-checking';
+type DeploymentProgressMessage={deploymentId:string;stage:DeploymentProgressStage;message?:string};
+type DeploymentProgressHandler=(message:DeploymentProgressMessage)=>void|Promise<void>;
+const deploymentProgressHandlers=new Map<string,DeploymentProgressHandler>();
+
+export function registerDeploymentProgress(deploymentId:string,handler:DeploymentProgressHandler){
+  if(deploymentProgressHandlers.has(deploymentId))throw new Error('Deployment progress handler already registered');
+  deploymentProgressHandlers.set(deploymentId,handler);
+}
+export function unregisterDeploymentProgress(deploymentId:string){
+  deploymentProgressHandlers.delete(deploymentId);
+}
+export function resolveDeploymentProgress(message:unknown):boolean{
+  const parsed=z.object({
+    type:z.literal('deployment.progress'),
+    deploymentId:z.uuid(),
+    stage:z.enum(['cloning','building','deploying','health-checking']),
+    message:z.string().max(500).optional()
+  }).strict().safeParse(message);
+  if(!parsed.success)return false;
+  const handler=deploymentProgressHandlers.get(parsed.data.deploymentId);
+  if(!handler)return false;
+  void Promise.resolve(handler(parsed.data)).catch(()=>{});
   return true;
 }
