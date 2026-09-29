@@ -131,6 +131,12 @@ export async function processDeploymentJob(deploymentId:string){
       25*60_000
     ));
     await progressChain;
+    await pool.query(
+      `UPDATE deployments
+       SET image_ref=$2,container_id=$3,previous_container_id=$4
+       WHERE id=$1`,
+      [deploymentId,result.imageRef,result.containerId,result.previousContainerId??null]
+    );
     await advanceTo(deploymentId,'health-checking','Agent completed deployment readiness checks');
     const state=await currentState(deploymentId);
     if(state==='health-checking'){
