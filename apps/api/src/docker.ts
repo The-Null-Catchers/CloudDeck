@@ -6,6 +6,7 @@ import {containerId,sendAgentCommand} from './commands.js';
 
 const params=z.object({serverId:z.uuid()});
 const containerParams=params.extend({containerId});
+const composeServiceParams=params.extend({project:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/),service:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/)});
 const containerSummary=z.object({
   id:containerId,
   name:z.string().max(200),
@@ -40,6 +41,7 @@ const statsSchema=z.object({
 });
 const logQuery=z.object({limit:z.coerce.number().int().min(1).max(500).default(200)}).strict();
 
+const composeLifecycleBody=z.object({action:z.enum(['start','stop','restart']),confirm:z.literal(true)}).strict();
 const lifecycleBody=z.object({
   action:z.enum(['start','stop','restart','pause','unpause','remove']),
   confirm:z.literal(true)
@@ -69,6 +71,26 @@ export async function dockerRoutes(app:FastifyInstance) {
     return {projects:z.array(composeProject).max(100).parse(result)};
   });
 
+
+
+  app.post('/servers/:serverId/docker/compose/:project/services/:service/action',async request=>{
+    const {userId}=await authenticate(request);
+    const {serverId,project,service}=composeServiceParams.parse(request.params);
+    const {action}=composeLifecycleBody.parse(request.body);
+    const orgId=await authorizedServer(userId,serverId,'server.action');
+    const agentAction={start:'docker.startComposeService',stop:'docker.stopComposeService',restart:'docker.restartComposeService'} as const;
+    const target=project+'/'+service;
+    const metadata={serverId,project,service,operation:action};
+    await audit(orgId,userId,`docker.compose.${action}.requested`,'compose_service',target,request.ip,metadata);
+    try{
+      z.object({ok:z.literal(true)}).parse(await sendAgentCommand(serverId,agentAction[action],{project,service}));
+      await audit(orgId,userId,`docker.compose.${action}.succeeded`,'compose_service',target,request.ip,metadata);
+      return {ok:true};
+    }catch(error){
+      await audit(orgId,userId,`docker.compose.${action}.failed`,'compose_service',target,request.ip,metadata);
+      throw error;
+    }
+  });
 
   app.get('/servers/:serverId/docker/containers/:containerId/inspect',async request=>{
     const {userId}=await authenticate(request);
