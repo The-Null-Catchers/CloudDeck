@@ -47,16 +47,18 @@ type deploymentExecuteResult struct {
 
 func validateDeploymentPayload(p deploymentExecutePayload) error {
  if !deploymentUUID.MatchString(p.DeploymentID) || !repoName.MatchString(p.RepositoryFullName) || !commitSHA.MatchString(p.CommitSHA) {return errors.New("Invalid deployment identity")}
- if p.DeploymentType!="dockerfile" {return errors.New("Only Dockerfile deployments are supported by this executor")}
+ if p.DeploymentType!="dockerfile"&&p.DeploymentType!="compose" {return errors.New("Invalid deployment type")}
  if p.GithubToken=="" || len(p.GithubToken)>1000 || strings.ContainsAny(p.GithubToken,"\r\n ") {return errors.New("Invalid GitHub credential")}
- if p.SourcePath=="" || filepath.IsAbs(p.SourcePath) || strings.Contains(p.SourcePath,"..") {return errors.New("Invalid Dockerfile path")}
- if p.Runtime.ContainerName==nil || !composeName.MatchString(*p.Runtime.ContainerName) {return errors.New("Invalid container runtime target")}
- if p.Runtime.RestartPolicy==nil {return errors.New("Missing restart policy")}
- switch *p.Runtime.RestartPolicy {case "no","always","unless-stopped","on-failure":default:return errors.New("Invalid restart policy")}
- if p.Runtime.ContainerPort!=nil && (*p.Runtime.ContainerPort<1||*p.Runtime.ContainerPort>65535){return errors.New("Invalid container port")}
- if p.Runtime.HostPort!=nil {
-  if p.Runtime.ContainerPort==nil || *p.Runtime.HostPort<1 || *p.Runtime.HostPort>65535 {return errors.New("Invalid host port")}
- }
+ if p.SourcePath=="" || filepath.IsAbs(p.SourcePath) || strings.Contains(p.SourcePath,"..") {return errors.New("Invalid source path")}
+ if p.DeploymentType=="dockerfile"{
+  if p.Runtime.ContainerName==nil || !composeName.MatchString(*p.Runtime.ContainerName) {return errors.New("Invalid container runtime target")}
+  if p.Runtime.RestartPolicy==nil {return errors.New("Missing restart policy")}
+  switch *p.Runtime.RestartPolicy {case "no","always","unless-stopped","on-failure":default:return errors.New("Invalid restart policy")}
+  if p.Runtime.ContainerPort!=nil && (*p.Runtime.ContainerPort<1||*p.Runtime.ContainerPort>65535){return errors.New("Invalid container port")}
+  if p.Runtime.HostPort!=nil {
+   if p.Runtime.ContainerPort==nil || *p.Runtime.HostPort<1 || *p.Runtime.HostPort>65535 {return errors.New("Invalid host port")}
+  }
+ }else if p.Runtime.ComposeProject==nil||!composeName.MatchString(*p.Runtime.ComposeProject){return errors.New("Invalid Compose project target")}
  return nil
 }
 
@@ -196,6 +198,10 @@ func executeDeploymentCommand(ctx context.Context,command agentCommand,write fun
  if command.Type!="command"||command.RequestID==""||decodeStrict(command.Payload,&p)!=nil||validateDeploymentPayload(p)!=nil{result.Error="Invalid deployment request";_ = write(result);return}
  emitDeploymentProgress(write,p.DeploymentID,"cloning","Downloading pinned GitHub source")
  root,err:=downloadDeploymentSource(ctx,p);if err!=nil{result.Error=err.Error();_ = write(result);return};defer os.RemoveAll(root)
+ if p.DeploymentType=="compose"{
+  deployed,err:=deployComposeProject(ctx,root,p,write);if err!=nil{result.Error=err.Error();_ = write(result);return}
+  result.Success=true;result.Data=deployed;_ = write(result);return
+ }
  emitDeploymentProgress(write,p.DeploymentID,"building","Building Docker image through Docker Engine API")
  imageRef,err:=buildDeploymentImage(ctx,root,p);if err!=nil{result.Error=err.Error();_ = write(result);return}
  emitDeploymentProgress(write,p.DeploymentID,"deploying","Activating the built container")
