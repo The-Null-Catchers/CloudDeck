@@ -115,16 +115,38 @@ func connect(endpoint,credential string) error {
  if err=write(map[string]string{"type":"hello","hostname":host,"operatingSystem":runtime.GOOS,"architecture":runtime.GOARCH,"agentVersion":"0.2.0"});err!=nil{return err}
  ctx,cancel:=context.WithCancel(context.Background())
  defer cancel()
+ subscriptions:=map[string]context.CancelFunc{}
+ var subscriptionsMu sync.Mutex
  go func() {
   defer cancel()
+  defer func(){subscriptionsMu.Lock();for _,stop:=range subscriptions{stop()};subscriptionsMu.Unlock()}()
   for {
    _,message,err:=conn.ReadMessage()
    if err!=nil{return}
    var envelope struct{Type string `json:"type"`}
-   if json.Unmarshal(message,&envelope)!=nil || envelope.Type!="command"{continue}
-   var command agentCommand
-   if json.Unmarshal(message,&command)!=nil{continue}
-   if write(executeCommand(command))!=nil{return}
+   if json.Unmarshal(message,&envelope)!=nil{continue}
+   switch envelope.Type{
+   case "command":
+    var command agentCommand
+    if json.Unmarshal(message,&command)!=nil{continue}
+    if write(executeCommand(command))!=nil{return}
+   case "stream.subscribe":
+    var sub streamSubscribe
+    if json.Unmarshal(message,&sub)!=nil || sub.SubscriptionID=="" || sub.Tail<0 || sub.Tail>500{continue}
+    subscriptionsMu.Lock()
+    if old:=subscriptions[sub.SubscriptionID];old!=nil{old()}
+    streamCtx,stop:=context.WithCancel(ctx);subscriptions[sub.SubscriptionID]=stop
+    subscriptionsMu.Unlock()
+    go func(){
+     runLogStream(streamCtx,sub,write)
+     subscriptionsMu.Lock();delete(subscriptions,sub.SubscriptionID);subscriptionsMu.Unlock()
+    }()
+   case "stream.unsubscribe":
+    var unsub streamUnsubscribe
+    if json.Unmarshal(message,&unsub)!=nil || unsub.SubscriptionID==""{continue}
+    subscriptionsMu.Lock();stop:=subscriptions[unsub.SubscriptionID];delete(subscriptions,unsub.SubscriptionID);subscriptionsMu.Unlock()
+    if stop!=nil{stop()}
+   }
   }
  }()
  ticker:=time.NewTicker(15*time.Second)
