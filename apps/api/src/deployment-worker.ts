@@ -13,10 +13,15 @@ import {
 } from './commands.js';
 import {canTransitionDeployment,transitionDeployment,type DeploymentState} from './deployments.js';
 
-const workerResult=z.object({
+const dockerWorkerResult=z.object({
   containerId:z.string().regex(/^[a-f0-9]{12,64}$/i),
   imageRef:z.string().min(1).max(255),
   previousContainerId:z.string().regex(/^[a-f0-9]{12,64}$/i).nullable().optional()
+}).strict();
+const containerMap=z.record(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/),z.string().regex(/^[a-f0-9]{12,64}$/i));
+const composeWorkerResult=z.object({
+  composeContainerIds:containerMap,
+  previousComposeContainerIds:containerMap.optional()
 }).strict();
 
 const stageOrder:DeploymentState[]=['queued','cloning','building','deploying','health-checking','successful'];
@@ -109,7 +114,7 @@ export async function processDeploymentJob(deploymentId:string){
   });
 
   try{
-    const result=workerResult.parse(await sendAgentCommand(
+    const rawResult=await sendAgentCommand(
       snapshot.server_id,
       'deployment.execute',
       {
@@ -129,20 +134,37 @@ export async function processDeploymentJob(deploymentId:string){
         }
       },
       25*60_000
-    ));
-    await progressChain;
-    await pool.query(
-      `UPDATE deployments
-       SET image_ref=$2,container_id=$3,previous_container_id=$4
-       WHERE id=$1`,
-      [deploymentId,result.imageRef,result.containerId,result.previousContainerId??null]
     );
+    await progressChain;
+    let successMessage:string;
+    let publicResult:object;
+    if(snapshot.deployment_type==='compose'){
+      const result=composeWorkerResult.parse(rawResult);
+      await pool.query(
+        `UPDATE deployments
+         SET compose_container_ids=$2::jsonb,previous_compose_container_ids=$3::jsonb
+         WHERE id=$1`,
+        [deploymentId,JSON.stringify(result.composeContainerIds),JSON.stringify(result.previousComposeContainerIds??{})]
+      );
+      successMessage=`Compose project ${snapshot.compose_project} activated with ${Object.keys(result.composeContainerIds).length} services`;
+      publicResult=result;
+    }else{
+      const result=dockerWorkerResult.parse(rawResult);
+      await pool.query(
+        `UPDATE deployments
+         SET image_ref=$2,container_id=$3,previous_container_id=$4
+         WHERE id=$1`,
+        [deploymentId,result.imageRef,result.containerId,result.previousContainerId??null]
+      );
+      successMessage=`Deployment activated as ${result.imageRef}`;
+      publicResult=result;
+    }
     await advanceTo(deploymentId,'health-checking','Agent completed deployment readiness checks');
     const state=await currentState(deploymentId);
     if(state==='health-checking'){
-      await transitionDeployment(deploymentId,'successful',{message:`Deployment activated as ${result.imageRef}`});
+      await transitionDeployment(deploymentId,'successful',{message:successMessage});
     }
-    return {status:'successful' as const,...result};
+    return {status:'successful' as const,...publicResult};
   }catch(error){
     await progressChain.catch(()=>{});
     const message=error instanceof Error?error.message:'Deployment execution failed';

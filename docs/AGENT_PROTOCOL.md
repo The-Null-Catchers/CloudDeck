@@ -106,3 +106,12 @@ Replacement is rollback-aware. The current named container is stopped and rename
 `deployment.rollback` restores only the container IDs recorded by a successful CloudDeck deployment. The command requires a deployment UUID, strict container name, current container ID, and preserved previous container ID. It does not accept shell text, image names, arbitrary Docker arguments, or filesystem paths.
 
 The Agent verifies that the configured runtime name still resolves to the expected current container before making changes. The previous container is restored and readiness-checked. If restoration fails, the Agent attempts to put the current container back under the runtime name and restart it before returning an error.
+
+
+### Safe Docker Compose executor
+
+For `deployment.execute` requests with `deploymentType: "compose"`, the Agent reads the pinned Compose file with strict YAML field validation. It never invokes a shell or the Docker Compose CLI.
+
+The current supported subset is intentionally limited to image/build services, ports, environment, restart policies, and list-form dependencies. Unsupported privileged/device/mount/network/command features are rejected before changing runtime state.
+
+Services are dependency-sorted, images are pulled or built through the Docker Engine API, and containers receive Compose-compatible project/service labels. The project default bridge network is created through the Docker Engine API. Every service must pass running/health readiness before the deployment is considered successful. On partial failure, newly created containers are removed and previously preserved project containers are restored.
