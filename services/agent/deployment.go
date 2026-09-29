@@ -276,3 +276,88 @@ func executeDeploymentRollbackCommand(ctx context.Context,command agentCommand,w
  rolledBack,err:=rollbackDeploymentContainer(ctx,p);if err!=nil{result.Error=err.Error();_ = write(result);return}
  result.Success=true;result.Data=rolledBack;_ = write(result)
 }
+
+
+type composeRollbackPayload struct {
+ DeploymentID string `json:"deploymentId"`
+ ComposeProject string `json:"composeProject"`
+ CurrentComposeContainerIDs map[string]string `json:"currentComposeContainerIds"`
+ PreviousComposeContainerIDs map[string]string `json:"previousComposeContainerIds"`
+}
+type composeRollbackResult struct {
+ ComposeContainerIDs map[string]string `json:"composeContainerIds"`
+ RolledBackComposeContainerIDs map[string]string `json:"rolledBackComposeContainerIds"`
+}
+
+func validateComposeRollbackPayload(p composeRollbackPayload) error {
+ if !deploymentUUID.MatchString(p.DeploymentID)||!composeName.MatchString(p.ComposeProject){return errors.New("Invalid Compose rollback identity")}
+ if len(p.CurrentComposeContainerIDs)==0||len(p.PreviousComposeContainerIDs)==0||len(p.CurrentComposeContainerIDs)>50||len(p.PreviousComposeContainerIDs)>50{return errors.New("Invalid Compose rollback container map")}
+ for service,id:=range p.CurrentComposeContainerIDs{
+  if !composeName.MatchString(service)||!dockerID.MatchString(id){return errors.New("Invalid current Compose container map")}
+ }
+ for service,id:=range p.PreviousComposeContainerIDs{
+  if !composeName.MatchString(service)||!dockerID.MatchString(id){return errors.New("Invalid previous Compose container map")}
+  if current,ok:=p.CurrentComposeContainerIDs[service];ok&&current==id{return errors.New("Compose rollback maps cannot reuse the same container")}
+ }
+ return nil
+}
+
+func rollbackComposeProject(ctx context.Context,p composeRollbackPayload)(composeRollbackResult,error){
+ var out composeRollbackResult
+ client,err:=deploymentHTTPClient(5*time.Minute);if err!=nil{return out,err}
+ for service,id:=range p.CurrentComposeContainerIDs{
+  expected:=p.ComposeProject+"-"+service+"-1"
+  activeID,_,_,err:=inspectNamedContainer(ctx,client,expected);if err!=nil{return out,err}
+  if activeID!=id{return out,fmt.Errorf("Compose service %s no longer matches rollback target",service)}
+ }
+ for service,id:=range p.PreviousComposeContainerIDs{
+  previousID,_,_,err:=inspectNamedContainer(ctx,client,id);if err!=nil{return out,err}
+  if previousID!=id{return out,fmt.Errorf("Previous Compose service %s is unavailable",service)}
+ }
+
+ stoppedCurrent:=map[string]string{}
+ rolledNames:=map[string]string{}
+ restoredPrevious:=map[string]string{}
+ revert:=func(){
+  for service,id:=range restoredPrevious{
+   if res,err:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/stop?t=10",nil);err==nil{_ = expectDockerStatus(res,204,304)}
+   backup:=p.ComposeProject+"-"+service+"-clouddeck-prev-"+strings.ToLower(p.DeploymentID[:8]);if len(backup)>127{backup=backup[:127]}
+   if res,err:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/rename?name="+url.QueryEscape(backup),nil);err==nil{_ = expectDockerStatus(res,204)}
+  }
+  for service,id:=range stoppedCurrent{
+   expected:=p.ComposeProject+"-"+service+"-1"
+   if res,err:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/rename?name="+url.QueryEscape(expected),nil);err==nil{_ = expectDockerStatus(res,204)}
+   if res,err:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/start",nil);err==nil{_ = expectDockerStatus(res,204,304)}
+  }
+ }
+
+ for service,id:=range p.CurrentComposeContainerIDs{
+  if res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/stop?t=15",nil);err!=nil{revert();return out,err}else if err:=expectDockerStatus(res,204,304);err!=nil{revert();return out,err}
+  rolled:=p.ComposeProject+"-"+service+"-clouddeck-rolled-"+strings.ToLower(p.DeploymentID[:8]);if len(rolled)>127{rolled=rolled[:127]}
+  if res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/rename?name="+url.QueryEscape(rolled),nil);err!=nil{revert();return out,err}else if err:=expectDockerStatus(res,204);err!=nil{revert();return out,err}
+  stoppedCurrent[service]=id;rolledNames[service]=rolled
+ }
+
+ for service,id:=range p.PreviousComposeContainerIDs{
+  expected:=p.ComposeProject+"-"+service+"-1"
+  if res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/rename?name="+url.QueryEscape(expected),nil);err!=nil{revert();return out,err}else if err:=expectDockerStatus(res,204);err!=nil{revert();return out,err}
+  if res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(id)+"/start",nil);err!=nil{revert();return out,err}else if err:=expectDockerStatus(res,204,304);err!=nil{revert();return out,err}
+  restoredPrevious[service]=id
+ }
+ for service,id:=range restoredPrevious{
+  if err:=waitContainerReady(ctx,client,id,45*time.Second);err!=nil{revert();return out,fmt.Errorf("Restored Compose service %s readiness failed",service)}
+ }
+ _=rolledNames
+ return composeRollbackResult{
+  ComposeContainerIDs:p.PreviousComposeContainerIDs,
+  RolledBackComposeContainerIDs:p.CurrentComposeContainerIDs,
+ },nil
+}
+
+func executeComposeRollbackCommand(ctx context.Context,command agentCommand,write func(any)error){
+ result:=commandResult{Type:"command.result",RequestID:command.RequestID}
+ var p composeRollbackPayload
+ if command.Type!="command"||command.RequestID==""||decodeStrict(command.Payload,&p)!=nil||validateComposeRollbackPayload(p)!=nil{result.Error="Invalid Compose rollback request";_ = write(result);return}
+ rolledBack,err:=rollbackComposeProject(ctx,p);if err!=nil{result.Error=err.Error();_ = write(result);return}
+ result.Success=true;result.Data=rolledBack;_ = write(result)
+}

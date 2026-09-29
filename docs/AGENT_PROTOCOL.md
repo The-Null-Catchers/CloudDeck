@@ -115,3 +115,10 @@ For `deployment.execute` requests with `deploymentType: "compose"`, the Agent re
 The current supported subset is intentionally limited to image/build services, ports, environment, restart policies, and list-form dependencies. Unsupported privileged/device/mount/network/command features are rejected before changing runtime state.
 
 Services are dependency-sorted, images are pulled or built through the Docker Engine API, and containers receive Compose-compatible project/service labels. The project default bridge network is created through the Docker Engine API. Every service must pass running/health readiness before the deployment is considered successful. On partial failure, newly created containers are removed and previously preserved project containers are restored.
+
+
+### Typed Compose rollback
+
+`deployment.rollbackCompose` accepts only a deployment UUID, strict Compose project name, and bounded current/previous service-to-container maps. Service names and Docker IDs are validated; arbitrary Docker arguments are not accepted.
+
+The Agent verifies the active project identity before mutation, restores all previous service containers, checks readiness per service, and attempts to recover the current project if any step fails. The API does not mark the deployment rolled back until this command completes successfully.
