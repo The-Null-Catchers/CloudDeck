@@ -37,3 +37,22 @@ export async function openLogStream(serverId:string,source:'docker'|'systemd',ta
   };
   return socket;
 }
+
+
+export type TerminalStreamEvent=
+  | {type:'ready';sessionId:string;timeoutSeconds:number}
+  | {type:'data';data:string}
+  | {type:'exit';exitCode?:number;error?:string};
+
+export async function openTerminalSession(serverId:string,onEvent:(event:TerminalStreamEvent)=>void){
+  const result=await api<{ticket:string;expiresInSeconds:number}>('/servers/'+serverId+'/terminal/ticket',{method:'POST'});
+  const endpoint=new URL('/api/v1/terminal/connect',base);
+  endpoint.protocol=endpoint.protocol==='https:'?'wss:':'ws:';
+  endpoint.searchParams.set('ticket',result.ticket);
+  const socket=new WebSocket(endpoint.toString());
+  socket.onmessage=event=>{
+    try{onEvent(JSON.parse(event.data) as TerminalStreamEvent)}
+    catch{socket.close(1007,'Invalid terminal payload')}
+  };
+  return socket;
+}
