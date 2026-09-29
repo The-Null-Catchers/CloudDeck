@@ -43,3 +43,17 @@ Local disconnect removes the CloudDeck link only; it does not uninstall the GitH
 
 
 Repository and branch discovery use short-lived installation access tokens generated from a GitHub App JWT signed with `RS256`. The private key remains server-side in `GITHUB_APP_PRIVATE_KEY`; installation tokens are generated on demand, used for a single GitHub API request, and never stored. Repository listing uses `GET /installation/repositories`; branch listing uses the linked installation token against the selected repository.
+
+
+## Application source configuration
+
+Creating an application requires a workspace server, a linked GitHub App installation, a repository, a branch, a deployment type (`dockerfile` or `compose`), and a source path.
+
+CloudDeck validates all of these before writing the application row:
+
+1. the target server belongs to the workspace;
+2. the GitHub installation link belongs to the same workspace;
+3. the selected repository/branch is accessible through an installation-scoped token;
+4. the configured `Dockerfile` or Compose file exists on that branch and is a file.
+
+Source paths must be relative, contain no `.`/`..` segments, and use a conservative filename character set. Application creation is audited with repository, branch, deployment type, and the verified commit SHA. The branch remains the configured source; the deployment worker will resolve and persist the exact commit SHA again when a deployment is actually enqueued.
