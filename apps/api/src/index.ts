@@ -14,6 +14,7 @@ import {logRoutes} from './logs.js';
 import {streamRoutes} from './streams.js';
 import {terminalRoutes} from './terminal.js';
 import {deploymentRoutes} from './deployments.js';
+import {githubRoutes} from './github.js';
 import './security.js';
 import { startOfflineSweep } from './offline.js';
 
@@ -43,6 +44,7 @@ export function buildApp() {
   app.register(streamRoutes,{prefix:'/api/v1'});
   app.register(terminalRoutes,{prefix:'/api/v1'});
   app.register(deploymentRoutes,{prefix:'/api/v1'});
+  app.register(githubRoutes,{prefix:'/api/v1'});
   return app;
 }
 
