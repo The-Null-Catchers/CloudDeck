@@ -99,3 +99,10 @@ The Agent emits bounded `deployment.progress` envelopes for `cloning`, `building
 Source handling is defensive: GitHub archives are pinned to the requested commit SHA, path traversal and link/device entries are rejected, extraction is bounded, and the configured Dockerfile must exist after extraction. Image build and container lifecycle operations use the Docker Engine Unix socket directly.
 
 Replacement is rollback-aware. The current named container is stopped and renamed before activation of the replacement. If replacement activation or readiness fails, the Agent removes the new container and restores the previous one. Terminal access remains the only arbitrary-shell path and is governed by its dedicated session protocol.
+
+
+### Typed deployment rollback
+
+`deployment.rollback` restores only the container IDs recorded by a successful CloudDeck deployment. The command requires a deployment UUID, strict container name, current container ID, and preserved previous container ID. It does not accept shell text, image names, arbitrary Docker arguments, or filesystem paths.
+
+The Agent verifies that the configured runtime name still resolves to the expected current container before making changes. The previous container is restored and readiness-checked. If restoration fails, the Agent attempts to put the current container back under the runtime name and restart it before returning an error.
