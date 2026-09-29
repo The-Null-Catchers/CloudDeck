@@ -45,3 +45,25 @@ export function sendAgentCommand(serverId:string,action:AgentAction,payload:obje
     });
   });
 }
+
+type StreamHandler=(message:{subscriptionId:string;line?:string;error?:string;done?:boolean})=>void;
+const streams=new Map<string,Map<string,StreamHandler>>();
+export function sendAgentEnvelope(serverId:string,envelope:object){
+  const connection=active.get(serverId);
+  if(!connection || connection.socket.readyState!==1)throw Object.assign(new Error('Agent not connected'),{statusCode:503});
+  connection.socket.send(JSON.stringify(envelope));
+}
+export function registerAgentStream(serverId:string,subscriptionId:string,handler:StreamHandler){
+  let serverStreams=streams.get(serverId);if(!serverStreams){serverStreams=new Map();streams.set(serverId,serverStreams);}
+  serverStreams.set(subscriptionId,handler);
+}
+export function unregisterAgentStream(serverId:string,subscriptionId:string){
+  const serverStreams=streams.get(serverId);serverStreams?.delete(subscriptionId);if(serverStreams?.size===0)streams.delete(serverId);
+}
+export function resolveAgentStream(serverId:string,message:unknown):boolean{
+  const parsed=z.object({type:z.literal('stream.data'),subscriptionId:z.uuid(),line:z.string().max(4000).optional(),error:z.string().max(200).optional(),done:z.boolean().optional()}).safeParse(message);
+  if(!parsed.success)return false;
+  const handler=streams.get(serverId)?.get(parsed.data.subscriptionId);if(!handler)return false;
+  handler(parsed.data);if(parsed.data.done||parsed.data.error)unregisterAgentStream(serverId,parsed.data.subscriptionId);
+  return true;
+}

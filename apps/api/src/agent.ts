@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { pool, transaction } from './db.js';
 import { digest, randomToken } from './security.js';
-import {attachAgent,detachAgent,resolveAgentResult} from './commands.js';
+import {attachAgent,detachAgent,resolveAgentResult,resolveAgentStream} from './commands.js';
 const uuid = z.uuid();
 const sample = z.object({type:z.literal('metrics'),cpuPercent:z.number().min(0).max(100),memoryPercent:z.number().min(0).max(100),diskPercent:z.number().min(0).max(100),load1:z.number().min(0).max(100000),networkRxBytes:z.number().int().nonnegative(),networkTxBytes:z.number().int().nonnegative()});
 const hello = z.object({type:z.literal('hello'),hostname:z.string().max(255),operatingSystem:z.string().max(100),architecture:z.string().max(50),agentVersion:z.string().max(32)});
@@ -34,7 +34,8 @@ export async function agentRoutes(app: FastifyInstance) {
       if (raw.length > 262144) {socket.close(1009,'Message too large');return;}
       let message: unknown;
       try { message=JSON.parse(raw.toString()); } catch {socket.close(1007,'Invalid JSON');return;}
-      if ((message as {type?:unknown})?.type==='command.result') {if(!resolveAgentResult(serverId,message))socket.close(1007,'Unknown command result');return;}
+      if ((message as {type?:unknown})?.type==='command.result') {if(!resolveAgentResult(serverId,message))socket.close(1007,'Unknown command result');lastMessage=Date.now();return;}
+      if ((message as {type?:unknown})?.type==='stream.data') {if(!resolveAgentStream(serverId,message))socket.close(1007,'Unknown stream result');lastMessage=Date.now();return;}
       if(raw.length>8192){socket.close(1009,'Message too large');return;}
       const h = hello.safeParse(message);
       const m = sample.safeParse(message);
