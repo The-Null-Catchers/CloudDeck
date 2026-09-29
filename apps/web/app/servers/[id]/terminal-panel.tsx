@@ -30,10 +30,10 @@ export function TerminalPanel({serverId,demo,online}:{serverId:string;demo:boole
     const socket=socketRef.current;
     if(!terminal||!fit)return;
     try{fit.fit();}catch{return;}
-    if(socket?.readyState===WebSocket.OPEN&&status==='live'){
+    if(socket?.readyState===WebSocket.OPEN){
       socket.send(JSON.stringify({type:'resize',cols:terminal.cols,rows:terminal.rows}));
     }
-  },[status]);
+  },[]);
 
   useEffect(()=>{
     const host=hostRef.current;
@@ -66,7 +66,7 @@ export function TerminalPanel({serverId,demo,online}:{serverId:string;demo:boole
     resizeRef.current=observer;
     const input=terminal.onData(data=>{
       const socket=socketRef.current;
-      if(socket?.readyState===WebSocket.OPEN&&status==='live')socket.send(JSON.stringify({type:'input',data}));
+      if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify({type:'input',data}));
     });
     return()=>{
       input.dispose();
@@ -81,7 +81,7 @@ export function TerminalPanel({serverId,demo,online}:{serverId:string;demo:boole
       terminalRef.current=null;
       fitRef.current=null;
     };
-  },[demo,sendResize,status]);
+  },[demo,sendResize]);
 
   const stop=useCallback(()=>{
     const socket=socketRef.current;
