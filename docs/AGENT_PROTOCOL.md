@@ -56,3 +56,19 @@ The agent returns `command.result` with either validated data or a bounded error
 Log tail requests are intentionally bounded to 500 lines and 256 KiB. They are snapshots, not fake realtime streams. Long-lived log streaming will use a dedicated subscription lifecycle rather than the 15-second request/response command timeout.
 
 The in-memory connection registry currently supports a single API instance. Horizontal API scaling requires Redis-backed routing/pub-sub or a dedicated agent gateway.
+
+
+## Realtime log subscriptions
+
+Long-lived logs use a dedicated stream lifecycle and never reuse the 15-second command request/response timeout.
+
+1. An authenticated user with `server.read` requests `POST /api/v1/servers/:serverId/logs/ticket` with a validated Docker container ID or systemd service name.
+2. The API issues a random, one-time ticket valid for 30 seconds. The browser never places its access JWT in a WebSocket URL.
+3. The browser connects to `/api/v1/logs/stream?ticket=<one-time-ticket>`.
+4. The API consumes the ticket and sends `stream.subscribe` to the already-authenticated outbound agent connection.
+5. The agent follows Docker logs through the Docker Engine API (`follow=1`) or systemd logs through `journalctl -f`, emitting bounded `stream.data` lines.
+6. Closing the browser socket sends `stream.unsubscribe`; the agent cancels the stream context and terminates the underlying reader/process.
+
+Each line is capped at 4000 characters. Docker frames larger than 64 KiB are rejected. Initial tail is capped at 500 lines. Stream data is forwarded in memory and is not persisted to PostgreSQL.
+
+Tickets and active agent routing are currently process-local. Horizontal API scaling requires Redis-backed ticket/session routing or a dedicated gateway before multiple API replicas are enabled.
