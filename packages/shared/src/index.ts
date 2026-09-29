@@ -2,7 +2,16 @@ export const roles = ['owner', 'admin', 'operator', 'viewer'] as const;
 export type Role = typeof roles[number];
 export const allowedActions = [
   'docker.listContainers',
+  'docker.startContainer',
+  'docker.stopContainer',
   'docker.restartContainer',
+  'docker.pauseContainer',
+  'docker.unpauseContainer',
+  'docker.removeContainer',
+  'docker.listComposeProjects',
+  'docker.inspectContainer',
+  'docker.getContainerStats',
+  'docker.tailContainerLogs',
   'systemd.listServices',
   'systemd.startService',
   'systemd.stopService',

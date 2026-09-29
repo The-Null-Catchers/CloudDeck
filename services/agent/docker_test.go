@@ -7,23 +7,24 @@ import (
  "path/filepath"
  "testing"
 )
-func TestDockerAllowlistAndUnixSocket(t *testing.T) {
- socket:=filepath.Join(t.TempDir(),"docker.sock")
- listener,err:=net.Listen("unix",socket);if err!=nil{t.Fatal(err)}
- mux:=http.NewServeMux()
- calls:=0
- mux.HandleFunc("/containers/json",func(w http.ResponseWriter,r *http.Request){calls++;if r.Method!="GET" || r.URL.Query().Get("all")!="1"{t.Errorf("unexpected list request: %s",r.URL)};w.Header().Set("Content-Type","application/json");w.Write([]byte(`[{"Id":"aaaaaaaaaaaa","Names":["/api"],"Image":"example:1","State":"running","Status":"Up","Ports":[]}]`))})
- mux.HandleFunc("/containers/aaaaaaaaaaaa/restart",func(w http.ResponseWriter,r *http.Request){calls++;if r.Method!="POST" || r.URL.Query().Get("t")!="10"{t.Errorf("unexpected restart request: %s",r.URL)};w.WriteHeader(204)})
- server:=&http.Server{Handler:mux};go server.Serve(listener);defer server.Close()
- t.Setenv("CLOUDDECK_DOCKER_SOCKET",socket)
- result:=executeCommand(agentCommand{Type:"command",RequestID:"r1",Action:"docker.listContainers",Payload:json.RawMessage(`{}`)})
- if !result.Success {t.Fatalf("list failed: %s",result.Error)}
- rows:=result.Data.([]containerSummary);if len(rows)!=1 || rows[0].Name!="api"{t.Fatalf("unexpected containers: %+v",rows)}
- invalid:=executeCommand(agentCommand{Type:"command",RequestID:"r2",Action:"docker.restartContainer",Payload:json.RawMessage(`{"containerId":"../etc/passwd"}`)})
- if invalid.Success{t.Fatal("unsafe ID accepted")}
- denied:=executeCommand(agentCommand{Type:"command",RequestID:"r3",Action:"shell.execute",Payload:json.RawMessage(`{}`)})
- if denied.Success{t.Fatal("unlisted action accepted")}
- restart:=executeCommand(agentCommand{Type:"command",RequestID:"r4",Action:"docker.restartContainer",Payload:json.RawMessage(`{"containerId":"aaaaaaaaaaaa"}`)})
- if !restart.Success{t.Fatalf("restart failed: %s",restart.Error)}
- if calls!=2{t.Fatalf("expected two Docker calls, got %d",calls)}
+
+func TestDockerLifecycleAndCompose(t *testing.T){
+ socket:=filepath.Join(t.TempDir(),"docker.sock");listener,err:=net.Listen("unix",socket);if err!=nil{t.Fatal(err)}
+ mux:=http.NewServeMux();calls:=map[string]int{}
+ mux.HandleFunc("/containers/json",func(w http.ResponseWriter,r *http.Request){calls["list"]++;w.Header().Set("Content-Type","application/json");w.Write([]byte(`[{"Id":"aaaaaaaaaaaa","Names":["/api"],"Image":"example:1","State":"running","Status":"Up","Labels":{"com.docker.compose.project":"clouddeck","com.docker.compose.service":"api"},"Ports":[]},{"Id":"bbbbbbbbbbbb","Names":["/db"],"Image":"postgres:17","State":"exited","Status":"Exited","Labels":{"com.docker.compose.project":"clouddeck","com.docker.compose.service":"db"},"Ports":[]}]`))})
+ for _,action:=range []string{"start","stop","restart","pause","unpause"}{
+  action:=action;path:="/containers/aaaaaaaaaaaa/"+action;mux.HandleFunc(path,func(w http.ResponseWriter,r *http.Request){calls[action]++;w.WriteHeader(204)})
+ }
+ mux.HandleFunc("/containers/aaaaaaaaaaaa",func(w http.ResponseWriter,r *http.Request){if r.Method!=http.MethodDelete{t.Errorf("expected DELETE")};calls["remove"]++;w.WriteHeader(204)})
+ server:=&http.Server{Handler:mux};go server.Serve(listener);defer server.Close();t.Setenv("CLOUDDECK_DOCKER_SOCKET",socket)
+
+ list:=executeCommand(agentCommand{Type:"command",RequestID:"1",Action:"docker.listContainers",Payload:json.RawMessage(`{}`)});if !list.Success{t.Fatal(list.Error)}
+ rows:=list.Data.([]containerSummary);if rows[0].ComposeProject!="clouddeck"{t.Fatalf("compose label missing: %+v",rows[0])}
+ projects:=executeCommand(agentCommand{Type:"command",RequestID:"2",Action:"docker.listComposeProjects",Payload:json.RawMessage(`{}`)});if !projects.Success{t.Fatal(projects.Error)}
+ p:=projects.Data.([]composeProjectSummary);if len(p)!=1||p[0].Running!=1||p[0].Total!=2{t.Fatalf("unexpected compose summary: %+v",p)}
+
+ actions:=[]string{"start","stop","restart","pause","unpause","remove"}
+ for i,a:=range actions{res:=executeCommand(agentCommand{Type:"command",RequestID:string(rune('a'+i)),Action:"docker."+a+"Container",Payload:json.RawMessage(`{"containerId":"aaaaaaaaaaaa"}`)});if !res.Success{t.Fatalf("%s failed: %s",a,res.Error)}}
+ invalid:=executeCommand(agentCommand{Type:"command",RequestID:"x",Action:"docker.removeContainer",Payload:json.RawMessage(`{"containerId":"../etc/passwd"}`)});if invalid.Success{t.Fatal("unsafe ID accepted")}
+ denied:=executeCommand(agentCommand{Type:"command",RequestID:"y",Action:"docker.exec",Payload:json.RawMessage(`{}`)});if denied.Success{t.Fatal("unlisted action accepted")}
 }
