@@ -203,3 +203,70 @@ func executeDeploymentCommand(ctx context.Context,command agentCommand,write fun
  emitDeploymentProgress(write,p.DeploymentID,"health-checking","Container started; readiness verified")
  result.Success=true;result.Data=deployed;_ = write(result)
 }
+
+
+type deploymentRollbackPayload struct {
+ DeploymentID string `json:"deploymentId"`
+ ContainerName string `json:"containerName"`
+ CurrentContainerID string `json:"currentContainerId"`
+ PreviousContainerID string `json:"previousContainerId"`
+}
+type deploymentRollbackResult struct {
+ ContainerID string `json:"containerId"`
+ RolledBackContainerID string `json:"rolledBackContainerId"`
+}
+
+func validateRollbackPayload(p deploymentRollbackPayload) error {
+ if !deploymentUUID.MatchString(p.DeploymentID)||!composeName.MatchString(p.ContainerName){return errors.New("Invalid rollback identity")}
+ if !dockerID.MatchString(p.CurrentContainerID)||!dockerID.MatchString(p.PreviousContainerID)||p.CurrentContainerID==p.PreviousContainerID{return errors.New("Invalid rollback container IDs")}
+ return nil
+}
+
+func waitContainerReady(ctx context.Context,client *http.Client,id string,timeout time.Duration)error{
+ deadline:=time.Now().Add(timeout)
+ for{
+  _,running,healthy,err:=inspectNamedContainer(ctx,client,id);if err!=nil{return err}
+  if running&&healthy{return nil}
+  if time.Now().After(deadline){return errors.New("Container readiness check failed")}
+  select{case <-ctx.Done():return ctx.Err();case <-time.After(2*time.Second):}
+ }
+}
+
+func rollbackDeploymentContainer(ctx context.Context,p deploymentRollbackPayload)(deploymentRollbackResult,error){
+ var out deploymentRollbackResult
+ client,err:=deploymentHTTPClient(5*time.Minute);if err!=nil{return out,err}
+ activeID,activeRunning,_,err:=inspectNamedContainer(ctx,client,p.ContainerName);if err!=nil{return out,err}
+ if activeID==""||activeID!=p.CurrentContainerID{return out,errors.New("Active deployment container no longer matches rollback target")}
+ previousID,_,_,err:=inspectNamedContainer(ctx,client,p.PreviousContainerID);if err!=nil{return out,err}
+ if previousID==""||previousID!=p.PreviousContainerID{return out,errors.New("Previous deployment container is unavailable")}
+ if activeRunning{
+  res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(activeID)+"/stop?t=15",nil);if err!=nil{return out,err}
+  if err:=expectDockerStatus(res,204,304);err!=nil{return out,err}
+ }
+ rolledName:=p.ContainerName+"-clouddeck-rolled-"+strings.ToLower(p.DeploymentID[:8]);if len(rolledName)>127{rolledName=rolledName[:127]}
+ res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(activeID)+"/rename?name="+url.QueryEscape(rolledName),nil);if err!=nil{return out,err}
+ if err:=expectDockerStatus(res,204);err!=nil{return out,err}
+ previousBackupName:=p.ContainerName+"-clouddeck-prev-"+strings.ToLower(p.DeploymentID[:8]);if len(previousBackupName)>127{previousBackupName=previousBackupName[:127]}
+ restoreCurrent:=func(){
+  if res,err:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(previousID)+"/rename?name="+url.QueryEscape(previousBackupName),nil);err==nil{_ = expectDockerStatus(res,204)}
+  if res,err:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(activeID)+"/rename?name="+url.QueryEscape(p.ContainerName),nil);err==nil{_ = expectDockerStatus(res,204)}
+  if activeRunning{if res,err:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(activeID)+"/start",nil);err==nil{_ = expectDockerStatus(res,204,304)}}
+ }
+ res,err=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(previousID)+"/rename?name="+url.QueryEscape(p.ContainerName),nil);if err!=nil{restoreCurrent();return out,err}
+ if err:=expectDockerStatus(res,204);err!=nil{restoreCurrent();return out,err}
+ res,err=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(previousID)+"/start",nil);if err!=nil{restoreCurrent();return out,err}
+ if err:=expectDockerStatus(res,204,304);err!=nil{restoreCurrent();return out,err}
+ if err:=waitContainerReady(ctx,client,previousID,30*time.Second);err!=nil{
+  if stop,stopErr:=dockerJSON(context.Background(),client,http.MethodPost,"/containers/"+url.PathEscape(previousID)+"/stop?t=10",nil);stopErr==nil{_ = expectDockerStatus(stop,204,304)}
+  restoreCurrent();return out,err
+ }
+ return deploymentRollbackResult{ContainerID:previousID,RolledBackContainerID:activeID},nil
+}
+
+func executeDeploymentRollbackCommand(ctx context.Context,command agentCommand,write func(any)error){
+ result:=commandResult{Type:"command.result",RequestID:command.RequestID}
+ var p deploymentRollbackPayload
+ if command.Type!="command"||command.RequestID==""||decodeStrict(command.Payload,&p)!=nil||validateRollbackPayload(p)!=nil{result.Error="Invalid deployment rollback request";_ = write(result);return}
+ rolledBack,err:=rollbackDeploymentContainer(ctx,p);if err!=nil{result.Error=err.Error();_ = write(result);return}
+ result.Success=true;result.Data=rolledBack;_ = write(result)
+}

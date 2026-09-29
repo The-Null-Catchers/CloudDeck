@@ -135,3 +135,29 @@ The GitHub installation token is ephemeral, is not written to PostgreSQL, BullMQ
 The Agent downloads the pinned commit archive, rejects unsafe archive entries, applies file-count/size limits, builds through the Docker Engine API, and activates the configured runtime target. Existing containers are stopped and renamed before replacement. If create/start/readiness fails, the Agent removes the replacement and restores the previous container name/state before reporting failure. Successful deployments retain the previous container ID for the rollback workflow.
 
 Automated Docker Compose execution is deliberately rejected with HTTP 409 for now. CloudDeck will add a Compose-spec-aware executor separately rather than falling back to unrestricted shell execution or ad-hoc `docker compose` CLI calls.
+
+
+## One-click Dockerfile rollback
+
+A successful Dockerfile deployment that replaced an existing container can be rolled back through:
+
+`POST /api/v1/deployments/:deploymentId/rollback`
+
+Body:
+
+```json
+{"confirm":true}
+```
+
+The endpoint requires `deployment.manage`. It rejects non-successful deployments and deployments that do not have both current and previous container IDs.
+
+Rollback is intentionally two-phase:
+
+1. CloudDeck records `deployment.rollback.requested` in the audit log.
+2. The Agent verifies that the currently named container still matches the deployment being rolled back.
+3. The current container is stopped and renamed aside.
+4. The preserved previous container is restored to the configured runtime name and started.
+5. The Agent waits for running/healthy readiness.
+6. Only after readiness succeeds does the API transition `successful -> rolled-back`, swap persisted container metadata, and append `deployment.rollback.completed`.
+
+If Agent-side restoration fails, the Agent attempts to restore the current container and CloudDeck records `deployment.rollback.failed`; the deployment remains `successful` because the requested rollback was not completed.
