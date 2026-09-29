@@ -115,6 +115,8 @@ func connect(endpoint,credential string) error {
  if err=write(map[string]string{"type":"hello","hostname":host,"operatingSystem":runtime.GOOS,"architecture":runtime.GOARCH,"agentVersion":"0.2.0"});err!=nil{return err}
  ctx,cancel:=context.WithCancel(context.Background())
  defer cancel()
+ terminals:=newTerminalManager(ctx,write)
+ defer terminals.closeAll()
  subscriptions:=map[string]context.CancelFunc{}
  var subscriptionsMu sync.Mutex
  go func() {
@@ -146,6 +148,22 @@ func connect(endpoint,credential string) error {
     if json.Unmarshal(message,&unsub)!=nil || unsub.SubscriptionID==""{continue}
     subscriptionsMu.Lock();stop:=subscriptions[unsub.SubscriptionID];delete(subscriptions,unsub.SubscriptionID);subscriptionsMu.Unlock()
     if stop!=nil{stop()}
+   case "terminal.open":
+    var request terminalOpen
+    if json.Unmarshal(message,&request)!=nil{continue}
+    if err:=terminals.open(request);err!=nil{_ = write(map[string]any{"type":"terminal.exit","sessionId":request.SessionID,"error":err.Error()})}
+   case "terminal.input":
+    var request terminalInput
+    if json.Unmarshal(message,&request)!=nil{continue}
+    if err:=terminals.input(request);err!=nil{_ = write(map[string]any{"type":"terminal.exit","sessionId":request.SessionID,"error":err.Error()});terminals.close(request.SessionID)}
+   case "terminal.resize":
+    var request terminalResize
+    if json.Unmarshal(message,&request)!=nil{continue}
+    if err:=terminals.resize(request);err!=nil{_ = write(map[string]any{"type":"terminal.exit","sessionId":request.SessionID,"error":err.Error()});terminals.close(request.SessionID)}
+   case "terminal.close":
+    var request terminalClose
+    if json.Unmarshal(message,&request)!=nil || !terminalSessionID.MatchString(request.SessionID){continue}
+    terminals.close(request.SessionID)
    }
   }
  }()

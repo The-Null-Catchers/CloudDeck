@@ -12,6 +12,7 @@ import {dockerRoutes} from './docker.js';
 import {serviceRoutes} from './services.js';
 import {logRoutes} from './logs.js';
 import {streamRoutes} from './streams.js';
+import {terminalRoutes} from './terminal.js';
 import './security.js';
 import { startOfflineSweep } from './offline.js';
 
@@ -39,6 +40,7 @@ export function buildApp() {
   app.register(serviceRoutes,{prefix:'/api/v1'});
   app.register(logRoutes,{prefix:'/api/v1'});
   app.register(streamRoutes,{prefix:'/api/v1'});
+  app.register(terminalRoutes,{prefix:'/api/v1'});
   return app;
 }
 

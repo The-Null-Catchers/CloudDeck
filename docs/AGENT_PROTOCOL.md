@@ -72,3 +72,19 @@ Long-lived logs use a dedicated stream lifecycle and never reuse the 15-second c
 Each line is capped at 4000 characters. Docker frames larger than 64 KiB are rejected. Initial tail is capped at 500 lines. Stream data is forwarded in memory and is not persisted to PostgreSQL.
 
 Tickets and active agent routing are currently process-local. Horizontal API scaling requires Redis-backed ticket/session routing or a dedicated gateway before multiple API replicas are enabled.
+
+
+## Authorized terminal sessions
+
+Terminal access is intentionally separate from the allowlisted command protocol. There is no `shell.exec` or arbitrary command action.
+
+1. An authenticated operator/admin/owner requests `POST /api/v1/servers/:serverId/terminal/ticket`.
+2. The API verifies `terminal.access`, returns a random one-time ticket valid for 30 seconds, and records ticket creation.
+3. The browser connects to `/api/v1/terminal/connect?ticket=<one-time-ticket>`; the access JWT is not placed in the WebSocket URL.
+4. The API creates a `terminal_sessions` audit record and asks the already-authenticated outbound agent to open a PTY using a dedicated `terminal.open` envelope.
+5. Input, resize, output, exit, and close use `terminal.input`, `terminal.resize`, `terminal.data`, `terminal.exit`, and `terminal.close` envelopes. Terminal data is base64-framed and bounded; browser input is capped at 4096 bytes per message.
+6. Sessions have a 30-minute server-side maximum lifetime. Closing the browser cancels the agent PTY and records an end reason.
+
+Terminal contents are never persisted by CloudDeck. Audit records contain actor, server, timestamps, session ID, and close reason only. The shell is started directly through a PTY, not through the typed command dispatcher. The agent accepts an absolute local shell path via `CLOUDDECK_TERMINAL_SHELL` (default `/bin/bash`).
+
+Terminal tickets and routing are process-local in this phase. Horizontal API scaling requires distributed session routing before multiple API replicas are enabled.

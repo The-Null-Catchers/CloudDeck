@@ -12,7 +12,7 @@ CloudDeck is a multi-server operations and observability platform that combines 
 - Metric aggregation into one-minute PostgreSQL buckets instead of persisting every realtime event.
 - Docker container inventory and audited restart through typed agent commands.
 - systemd service inventory plus audited start/stop/restart actions. Unit names are strictly validated and no shell command endpoint exists.
-- Bounded systemd journal tail retrieval (up to 500 lines / 256 KiB) with read auditing. True live streaming is intentionally deferred to a dedicated subscription protocol.
+- Bounded systemd journal snapshots plus realtime Docker/systemd log subscriptions using one-time WebSocket tickets, cancellation, and capped in-memory UI buffers.
 - Docker Compose local stack and GitHub Actions checks for Node and Go.
 
 ## Architecture
@@ -71,8 +71,8 @@ See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [arc
 
 1. Foundation: auth, organizations, database, dashboard — functional baseline.
 2. Agent: pairing, heartbeat, telemetry, metric aggregation — functional baseline; distributed connection routing still pending.
-3. Operations: Docker inventory/restart, systemd inventory/actions, bounded journal logs — in progress. Next: full container lifecycle, Compose detection, resource usage and dedicated realtime log subscriptions.
-4. Browser terminal with dedicated permission, PTY lifecycle and session limits.
+3. Operations: Docker lifecycle/inspection, Compose service controls, systemd management, bounded snapshots, and realtime Docker/systemd logs — functional baseline.
+4. Browser terminal — backend/agent session protocol now includes dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, and a 30-minute limit. Next: xterm.js web UI.
 5. GitHub App, deployment state machine, health activation and rollback.
 6. Health checks, alert rules and email/in-app notifications.
 7. Caddy/Nginx domains, encrypted secrets, verified backups and restore.
