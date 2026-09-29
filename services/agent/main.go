@@ -11,9 +11,11 @@ import (
  "net/http"
  "net/url"
  "os"
+ "path/filepath"
  "runtime"
  "strconv"
  "strings"
+ "sync"
  "time"
 
  "github.com/gorilla/websocket"
@@ -28,43 +30,161 @@ type metric struct {
  NetworkRxBytes uint64 `json:"networkRxBytes"`
  NetworkTxBytes uint64 `json:"networkTxBytes"`
 }
-type credentials struct { ServerID string `json:"serverId"`; Credential string `json:"credential"` }
-func readConfig(path string) (credentials,error) { var c credentials; b,e:=os.ReadFile(path);if e!=nil{return c,e};e=json.Unmarshal(b,&c);return c,e }
-func saveConfig(path string,c credentials) error { b,e:=json.Marshal(c);if e!=nil{return e};return os.WriteFile(path,b,0600) }
+
+type credentials struct {
+ ServerID string `json:"serverId"`
+ Credential string `json:"credential"`
+}
+
+func readConfig(path string) (credentials,error) {
+ var c credentials
+ info,err:=os.Stat(path)
+ if err!=nil {return c,err}
+ if info.Mode().Perm()&0077!=0 {return c,errors.New("credential file permissions are too broad")}
+ contents,err:=os.ReadFile(path)
+ if err!=nil {return c,err}
+ err=json.Unmarshal(contents,&c)
+ return c,err
+}
+
+func saveConfig(path string,c credentials) error {
+ if err:=os.MkdirAll(filepath.Dir(path),0700);err!=nil{return err}
+ contents,err:=json.Marshal(c)
+ if err!=nil{return err}
+ file,err:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+ if err!=nil{return err}
+ defer file.Close()
+ if _,err=file.Write(contents);err!=nil {os.Remove(path);return err}
+ return file.Sync()
+}
+
 func pair(base,id,token string) (string,error) {
  payload,_:=json.Marshal(map[string]string{"serverId":id,"token":token})
- response,e:=http.Post(base+"/api/v1/agent/pair","application/json",bytes.NewReader(payload));if e!=nil{return "",e};defer response.Body.Close()
- if response.StatusCode!=201{return "",fmt.Errorf("pairing failed (HTTP %d)",response.StatusCode)}
- var result struct{Credential string `json:"credential"`};e=json.NewDecoder(io.LimitReader(response.Body,4096)).Decode(&result);return result.Credential,e
+ client:=&http.Client{Timeout:10*time.Second}
+ response,err:=client.Post(base+"/api/v1/agent/pair","application/json",bytes.NewReader(payload))
+ if err!=nil{return "",err}
+ defer response.Body.Close()
+ if response.StatusCode!=http.StatusCreated{return "",fmt.Errorf("pairing failed (HTTP %d)",response.StatusCode)}
+ var result struct{Credential string `json:"credential"`}
+ if err=json.NewDecoder(io.LimitReader(response.Body,4096)).Decode(&result);err!=nil{return "",err}
+ if result.Credential==""{return "",errors.New("pairing response has no credential")}
+ return result.Credential,nil
 }
-func main(){
- base:=strings.TrimRight(os.Getenv("CLOUDDECK_API_URL"),"/"); id:=os.Getenv("CLOUDDECK_SERVER_ID"); path:=os.Getenv("CLOUDDECK_CREDENTIAL_FILE");if path==""{path="/var/lib/clouddeck-agent/credential.json"}
+
+func main() {
+ base:=strings.TrimRight(os.Getenv("CLOUDDECK_API_URL"),"/")
+ id:=os.Getenv("CLOUDDECK_SERVER_ID")
+ path:=os.Getenv("CLOUDDECK_CREDENTIAL_FILE")
+ if path=="" {path="/var/lib/clouddeck-agent/credential.json"}
  if base=="" || id=="" {log.Fatal("CLOUDDECK_API_URL and CLOUDDECK_SERVER_ID are required")}
- u,e:=url.Parse(base);if e!=nil || (u.Scheme!="https" && !(u.Scheme=="http" && (u.Hostname()=="localhost" || u.Hostname()=="127.0.0.1"))){log.Fatal("HTTPS is required outside localhost")}
- c,e:=readConfig(path)
- if errors.Is(e,os.ErrNotExist){token:=os.Getenv("CLOUDDECK_PAIRING_TOKEN");if token==""{log.Fatal("pairing token required for first connection")};credential,err:=pair(base,id,token);if err!=nil{log.Fatal(err)};c=credentials{ServerID:id,Credential:credential};if err=saveConfig(path,c);err!=nil{log.Fatal(err)}}else if e!=nil{log.Fatal(e)}
- if c.ServerID!=id{log.Fatal("credential belongs to a different server")}
- ws:=*u;if u.Scheme=="https"{ws.Scheme="wss"}else{ws.Scheme="ws"};ws.Path="/api/v1/agent/connect/"+url.PathEscape(id)
- for {if err:=connect(ws.String(),c.Credential);err!=nil{log.Printf("connection interrupted: %v",err)};time.Sleep(5*time.Second)}
+ endpoint,err:=url.Parse(base)
+ if err!=nil || (endpoint.Scheme!="https" && !(endpoint.Scheme=="http" && (endpoint.Hostname()=="localhost" || endpoint.Hostname()=="127.0.0.1"))) {
+  log.Fatal("HTTPS is required outside localhost")
+ }
+ c,err:=readConfig(path)
+ if errors.Is(err,os.ErrNotExist) {
+  token:=os.Getenv("CLOUDDECK_PAIRING_TOKEN")
+  if token==""{log.Fatal("pairing token required for first connection")}
+  credential,pairErr:=pair(base,id,token)
+  if pairErr!=nil{log.Fatal(pairErr)}
+  c=credentials{ServerID:id,Credential:credential}
+  if err=saveConfig(path,c);err!=nil{log.Fatal(err)}
+ } else if err!=nil {log.Fatal(err)}
+ if c.ServerID!=id || c.Credential==""{log.Fatal("credential belongs to a different server or is missing")}
+ if len(os.Args)==2 && os.Args[1]=="--pair-only" {return}
+ if len(os.Args)>1 {log.Fatal("unsupported argument")}
+ ws:=*endpoint
+ if endpoint.Scheme=="https"{ws.Scheme="wss"}else{ws.Scheme="ws"}
+ ws.Path="/api/v1/agent/connect/"+url.PathEscape(id)
+ for {
+  if err:=connect(ws.String(),c.Credential);err!=nil{log.Printf("connection interrupted: %v",err)}
+  time.Sleep(5*time.Second)
+ }
 }
+
 func connect(endpoint,credential string) error {
- header:=http.Header{};header.Set("Authorization","Bearer "+credential)
- conn,_,err:=websocket.DefaultDialer.Dial(endpoint,header);if err!=nil{return err};defer conn.Close()
- host,_:=os.Hostname();if err=conn.WriteJSON(map[string]string{"type":"hello","hostname":host,"operatingSystem":runtime.GOOS,"architecture":runtime.GOARCH,"agentVersion":"0.1.0"});err!=nil{return err}
- ctx,cancel:=context.WithCancel(context.Background());defer cancel()
- go func(){defer cancel();for {_,_,err:=conn.ReadMessage();if err!=nil{return}}}()
- ticker:=time.NewTicker(15*time.Second);defer ticker.Stop()
- var previousCPU,totalCPU uint64
- for {select {case <-ctx.Done():return errors.New("socket closed");case <-ticker.C:
-  m:=collect(&previousCPU,&totalCPU);if err:=conn.WriteJSON(m);err!=nil{return err}
- }}
+ headers:=http.Header{}
+ headers.Set("Authorization","Bearer "+credential)
+ conn,_,err:=websocket.DefaultDialer.Dial(endpoint,headers)
+ if err!=nil{return err}
+ defer conn.Close()
+ var writeMu sync.Mutex
+ write:=func(value any) error {writeMu.Lock();defer writeMu.Unlock();return conn.WriteJSON(value)}
+ conn.SetReadLimit(8192)
+ host,_:=os.Hostname()
+ if err=write(map[string]string{"type":"hello","hostname":host,"operatingSystem":runtime.GOOS,"architecture":runtime.GOARCH,"agentVersion":"0.2.0"});err!=nil{return err}
+ ctx,cancel:=context.WithCancel(context.Background())
+ defer cancel()
+ go func() {
+  defer cancel()
+  for {
+   _,message,err:=conn.ReadMessage()
+   if err!=nil{return}
+   var envelope struct{Type string `json:"type"`}
+   if json.Unmarshal(message,&envelope)!=nil || envelope.Type!="command"{continue}
+   var command agentCommand
+   if json.Unmarshal(message,&command)!=nil{continue}
+   if write(executeCommand(command))!=nil{return}
+  }
+ }()
+ ticker:=time.NewTicker(15*time.Second)
+ defer ticker.Stop()
+ var previousIdle,previousTotal uint64
+ for {
+  select {
+  case <-ctx.Done():return errors.New("socket closed")
+  case <-ticker.C:
+   if err:=write(collect(&previousIdle,&previousTotal));err!=nil{return err}
+  }
+ }
 }
+
 func collect(previousIdle,previousTotal *uint64) metric {
- m:=metric{Type:"metrics"}
- if b,e:=os.ReadFile("/proc/stat");e==nil {line:=strings.SplitN(string(b),"\n",2)[0];fields:=strings.Fields(line);var total,idle uint64;for i,v:=range fields[1:]{n,_:=strconv.ParseUint(v,10,64);total+=n;if i==3 || i==4{idle+=n}};if total>*previousTotal{delta:=total-*previousTotal;if delta>0{m.CPUPercent=100*float64(delta-(idle-*previousIdle))/float64(delta)}};*previousTotal=total;*previousIdle=idle}
- if b,e:=os.ReadFile("/proc/meminfo");e==nil {var total,available float64;for _,line:=range strings.Split(string(b),"\n"){fields:=strings.Fields(line);if len(fields)<2{continue};n,_:=strconv.ParseFloat(fields[1],64);switch fields[0]{case "MemTotal:":total=n;case "MemAvailable:":available=n}};if total>0{m.MemoryPercent=100*(total-available)/total}}
- if b,e:=os.ReadFile("/proc/loadavg");e==nil {m.Load1,_=strconv.ParseFloat(strings.Fields(string(b))[0],64)}
- if b,e:=os.ReadFile("/proc/net/dev");e==nil {for _,line:=range strings.Split(string(b),"\n"){parts:=strings.SplitN(line,":",2);if len(parts)<2 || strings.TrimSpace(parts[0])=="lo"{continue};fields:=strings.Fields(parts[1]);if len(fields)>=9{rx,_:=strconv.ParseUint(fields[0],10,64);tx,_:=strconv.ParseUint(fields[8],10,64);m.NetworkRxBytes+=rx;m.NetworkTxBytes+=tx}}}
- m.DiskPercent=diskUsage("/")
- return m
+ result:=metric{Type:"metrics"}
+ if contents,err:=os.ReadFile("/proc/stat");err==nil {
+  fields:=strings.Fields(strings.SplitN(string(contents),"\n",2)[0])
+  var total,idle uint64
+  if len(fields)<5{return result}
+  for i,value:=range fields[1:] {
+   count,_:=strconv.ParseUint(value,10,64)
+   total+=count
+   if i==3 || i==4 {idle+=count}
+  }
+  if total>*previousTotal && idle>=*previousIdle {
+   delta:=total-*previousTotal
+   idleDelta:=idle-*previousIdle
+   if idleDelta<=delta {result.CPUPercent=100*float64(delta-idleDelta)/float64(delta)}
+  }
+  *previousTotal=total
+  *previousIdle=idle
+ }
+ if contents,err:=os.ReadFile("/proc/meminfo");err==nil {
+  var total,available float64
+  for _,line:=range strings.Split(string(contents),"\n") {
+   fields:=strings.Fields(line)
+   if len(fields)<2{continue}
+   count,_:=strconv.ParseFloat(fields[1],64)
+   switch fields[0]{case "MemTotal:":total=count;case "MemAvailable:":available=count}
+  }
+  if total>0 {result.MemoryPercent=100*(total-available)/total}
+ }
+ if contents,err:=os.ReadFile("/proc/loadavg");err==nil {
+  fields:=strings.Fields(string(contents))
+  if len(fields)>0 {result.Load1,_=strconv.ParseFloat(fields[0],64)}
+ }
+ if contents,err:=os.ReadFile("/proc/net/dev");err==nil {
+  for _,line:=range strings.Split(string(contents),"\n") {
+   parts:=strings.SplitN(line,":",2)
+   if len(parts)<2 || strings.TrimSpace(parts[0])=="lo"{continue}
+   fields:=strings.Fields(parts[1])
+   if len(fields)>=9 {
+    rx,_:=strconv.ParseUint(fields[0],10,64)
+    tx,_:=strconv.ParseUint(fields[8],10,64)
+    result.NetworkRxBytes+=rx
+    result.NetworkTxBytes+=tx
+   }
+  }
+ }
+ result.DiskPercent=diskUsage("/")
+ return result
 }

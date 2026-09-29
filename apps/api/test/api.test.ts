@@ -18,6 +18,12 @@ test('registration, workspace isolation, server pairing, and refresh rotation',a
   const create=await app.inject({method:'POST',url:'/api/v1/servers',headers:{authorization:`Bearer ${token}`},payload:{organizationId,name:'Test server'}});
   assert.equal(create.statusCode,201,create.body);
   const server=create.json();
+  const viewerRegister=await app.inject({method:'POST',url:'/api/v1/auth/register',payload:{email:`viewer-${suffix}@example.com`,password:'another secure passphrase 2026'}});
+  assert.equal(viewerRegister.statusCode,201);
+  const viewerUser=await pool.query('SELECT id FROM users WHERE email=$1',[`viewer-${suffix}@example.com`]);
+  await pool.query('INSERT INTO organization_members(organization_id,user_id,role) VALUES($1,$2,$3)',[organizationId,viewerUser.rows[0].id,'viewer']);
+  const viewerRestart=await app.inject({method:'POST',url:`/api/v1/servers/${server.id}/docker/containers/${'a'.repeat(64)}/restart`,headers:{authorization:`Bearer ${viewerRegister.json().accessToken}`},payload:{confirm:true}});
+  assert.equal(viewerRestart.statusCode,403);
   const pair=await app.inject({method:'POST',url:'/api/v1/agent/pair',payload:{serverId:server.id,token:server.pairingToken}});
   assert.equal(pair.statusCode,201,pair.body);
   const secondPair=await app.inject({method:'POST',url:'/api/v1/agent/pair',payload:{serverId:server.id,token:server.pairingToken}});
@@ -26,6 +32,8 @@ test('registration, workspace isolation, server pairing, and refresh rotation',a
   assert.equal(refreshed.statusCode,200,refreshed.body);
   const reused=await app.inject({method:'POST',url:'/api/v1/auth/refresh',headers:{cookie:`clouddeck_refresh=${cookie}`}});
   assert.equal(reused.statusCode,401);
-  await pool.query('DELETE FROM users WHERE email=$1',[`test-${suffix}@example.com`]);
+  await pool.query('DELETE FROM users WHERE email IN ($1,$2)',[`test-${suffix}@example.com`,`viewer-${suffix}@example.com`]);
+  await pool.query('DELETE FROM organizations WHERE id=$1',[organizationId]);
+  await pool.query('DELETE FROM organizations WHERE id=$1',[viewerRegister.json().organizationId]);
   await app.close();
 });
