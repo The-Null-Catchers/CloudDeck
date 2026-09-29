@@ -76,23 +76,24 @@ func (m *terminalManager) open(request terminalOpen) error {
 
 func (m *terminalManager) read(id string,process *terminalProcess,command *exec.Cmd){
  buffer:=make([]byte,4096)
+ streamInterrupted:=false
  for{
   count,err:=process.file.Read(buffer)
   if count>0{
    encoded:=base64.StdEncoding.EncodeToString(buffer[:count])
-   if emitErr:=m.emit(map[string]any{"type":"terminal.data","sessionId":id,"data":encoded});emitErr!=nil{break}
+   if emitErr:=m.emit(map[string]any{"type":"terminal.data","sessionId":id,"data":encoded});emitErr!=nil{streamInterrupted=true;break}
   }
-  if err!=nil{
-   if !errors.Is(err,io.EOF){_ = m.emit(map[string]any{"type":"terminal.exit","sessionId":id,"error":"terminal stream interrupted"})}
-   break
-  }
+  if err!=nil{streamInterrupted=!errors.Is(err,io.EOF);break}
  }
  waitErr:=command.Wait()
  m.mu.Lock()
  current:=m.sessions[id]
- if current==process{delete(m.sessions,id)}
+ active:=current==process
+ if active{delete(m.sessions,id)}
  m.mu.Unlock()
  _=process.file.Close()
+ if !active{return}
+ if streamInterrupted{_ = m.emit(map[string]any{"type":"terminal.exit","sessionId":id,"error":"terminal stream interrupted"});return}
  exitCode:=0
  if waitErr!=nil{
   exitCode=-1
