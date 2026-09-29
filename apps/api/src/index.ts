@@ -32,7 +32,7 @@ export function buildApp() {
   app.setErrorHandler((error: FastifyError,request,reply) => {
     const status = error instanceof ZodError ? 400 : ('statusCode' in error && typeof error.statusCode==='number' ? error.statusCode : 500);
     if (status>=500) request.log.error(error);
-    reply.code(status).send({error:{code: status===400?'VALIDATION_ERROR':status===401?'UNAUTHORIZED':status===403?'FORBIDDEN':status===404?'NOT_FOUND':status===503?'AGENT_UNAVAILABLE':status===504?'AGENT_TIMEOUT':'INTERNAL_ERROR',message:status>=500?'Internal server error':error.message}});
+    reply.code(status).send({error:{code: status===400?'VALIDATION_ERROR':status===401?'UNAUTHORIZED':status===403?'FORBIDDEN':status===404?'NOT_FOUND':status===409?'CONFLICT':status===502?'UPSTREAM_ERROR':status===503?'AGENT_UNAVAILABLE':status===504?'AGENT_TIMEOUT':'INTERNAL_ERROR',message:status>=500?'Internal server error':error.message}});
   });
   app.get('/health',async () => ({status:'ok'}));
   app.register(authRoutes,{prefix:'/api/v1/auth'});
