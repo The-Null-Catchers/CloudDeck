@@ -76,7 +76,7 @@ export function startDeploymentQueueReconciler(intervalMs=15_000){
   const run=async()=>{
     if(running)return;
     running=true;
-    try{await reconcileQueuedDeployments();}catch{}finally{running=false;}
+    try{await reconcileQueuedDeployments();}catch{void 0;}finally{running=false;}
   };
   void run();
   const timer=setInterval(()=>void run(),delay);
