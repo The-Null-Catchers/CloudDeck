@@ -69,6 +69,88 @@ func listComposeProjects()([]composeProjectSummary,error){
  for _,name:=range names{p:=projects[name];services:=make([]string,0,len(p.services));for s:=range p.services{services=append(services,s)};sort.Strings(services);out=append(out,composeProjectSummary{Name:name,Services:services,Running:p.running,Total:p.total})}
  return out,nil
 }
+
+type containerInspect struct {
+ Image string `json:"image"`
+ Created string `json:"created"`
+ RestartCount int `json:"restartCount"`
+ Mounts []struct{Type string `json:"type"`;Source string `json:"source,omitempty"`;Destination string `json:"destination"`;ReadOnly bool `json:"readOnly"`} `json:"mounts"`
+ Networks []string `json:"networks"`
+ Ports []string `json:"ports"`
+}
+type containerStats struct {
+ CPUPercent float64 `json:"cpuPercent"`
+ MemoryUsage uint64 `json:"memoryUsage"`
+ MemoryLimit uint64 `json:"memoryLimit"`
+ NetworkRxBytes uint64 `json:"networkRxBytes"`
+ NetworkTxBytes uint64 `json:"networkTxBytes"`
+}
+
+func inspectContainer(id string)(containerInspect,error){
+ var out containerInspect
+ if !dockerID.MatchString(id){return out,errors.New("Invalid container ID")}
+ res,err:=dockerRequest(http.MethodGet,"/containers/"+id+"/json");if err!=nil{return out,err};defer res.Body.Close()
+ var raw struct{
+  Image string `json:"Image"`
+  Created string `json:"Created"`
+  RestartCount int `json:"RestartCount"`
+  Mounts []struct{Type string `json:"Type"`;Source string `json:"Source"`;Destination string `json:"Destination"`;RW bool `json:"RW"`} `json:"Mounts"`
+  NetworkSettings struct{
+   Networks map[string]json.RawMessage `json:"Networks"`
+   Ports map[string]json.RawMessage `json:"Ports"`
+  } `json:"NetworkSettings"`
+ }
+ if err:=json.NewDecoder(io.LimitReader(res.Body,512*1024)).Decode(&raw);err!=nil{return out,errors.New("Invalid Docker inspect response")}
+ out.Image=raw.Image;out.Created=raw.Created;out.RestartCount=raw.RestartCount
+ out.Mounts=make([]struct{Type string `json:"type"`;Source string `json:"source,omitempty"`;Destination string `json:"destination"`;ReadOnly bool `json:"readOnly"`},0,len(raw.Mounts))
+ for _,m:=range raw.Mounts{
+  item:=struct{Type string `json:"type"`;Source string `json:"source,omitempty"`;Destination string `json:"destination"`;ReadOnly bool `json:"readOnly"`}{Type:m.Type,Destination:m.Destination,ReadOnly:!m.RW}
+  if m.Type=="volume"{item.Source=m.Source}
+  out.Mounts=append(out.Mounts,item)
+ }
+ for name:=range raw.NetworkSettings.Networks{out.Networks=append(out.Networks,name)}
+ for port:=range raw.NetworkSettings.Ports{out.Ports=append(out.Ports,port)}
+ sort.Strings(out.Networks);sort.Strings(out.Ports)
+ return out,nil
+}
+
+func getContainerStats(id string)(containerStats,error){
+ var out containerStats
+ if !dockerID.MatchString(id){return out,errors.New("Invalid container ID")}
+ res,err:=dockerRequest(http.MethodGet,"/containers/"+id+"/stats?stream=false&one-shot=true");if err!=nil{return out,err};defer res.Body.Close()
+ var raw struct{
+  CPUStats struct{CPUUsage struct{TotalUsage uint64 `json:"total_usage"`;PercpuUsage []uint64 `json:"percpu_usage"`} `json:"cpu_usage"`;SystemCPUUsage uint64 `json:"system_cpu_usage"`;OnlineCPUs uint64 `json:"online_cpus"`} `json:"cpu_stats"`
+  PreCPUStats struct{CPUUsage struct{TotalUsage uint64 `json:"total_usage"`} `json:"cpu_usage"`;SystemCPUUsage uint64 `json:"system_cpu_usage"`} `json:"precpu_stats"`
+  MemoryStats struct{Usage uint64 `json:"usage"`;Limit uint64 `json:"limit"`} `json:"memory_stats"`
+  Networks map[string]struct{RxBytes uint64 `json:"rx_bytes"`;TxBytes uint64 `json:"tx_bytes"`} `json:"networks"`
+ }
+ if err:=json.NewDecoder(io.LimitReader(res.Body,512*1024)).Decode(&raw);err!=nil{return out,errors.New("Invalid Docker stats response")}
+ cpuDelta:=raw.CPUStats.CPUUsage.TotalUsage-raw.PreCPUStats.CPUUsage.TotalUsage
+ systemDelta:=raw.CPUStats.SystemCPUUsage-raw.PreCPUStats.SystemCPUUsage
+ cpus:=raw.CPUStats.OnlineCPUs;if cpus==0{cpus=uint64(len(raw.CPUStats.CPUUsage.PercpuUsage))};if cpus==0{cpus=1}
+ if systemDelta>0{out.CPUPercent=float64(cpuDelta)/float64(systemDelta)*float64(cpus)*100}
+ out.MemoryUsage=raw.MemoryStats.Usage;out.MemoryLimit=raw.MemoryStats.Limit
+ for _,n:=range raw.Networks{out.NetworkRxBytes+=n.RxBytes;out.NetworkTxBytes+=n.TxBytes}
+ return out,nil
+}
+
+func tailContainerLogs(id string,limit int)([]string,bool,error){
+ if !dockerID.MatchString(id){return nil,false,errors.New("Invalid container ID")}
+ if limit<1||limit>500{return nil,false,errors.New("Invalid log limit")}
+ res,err:=dockerRequest(http.MethodGet,fmt.Sprintf("/containers/%s/logs?stdout=1&stderr=1&timestamps=1&tail=%d",id,limit));if err!=nil{return nil,false,err};defer res.Body.Close()
+ data,err:=io.ReadAll(io.LimitReader(res.Body,256*1024+1));if err!=nil{return nil,false,errors.New("Unable to read Docker logs")}
+ truncated:=len(data)>256*1024;if truncated{data=data[:256*1024]}
+ lines:=make([]string,0,limit)
+ for len(data)>=8 && (data[0]==1||data[0]==2){
+  size:=int(data[4])<<24|int(data[5])<<16|int(data[6])<<8|int(data[7]);if size<0||8+size>len(data){break}
+  chunk:=strings.TrimSpace(string(data[8:8+size]));if chunk!=""{for _,line:=range strings.Split(chunk,"\n"){if len(line)>4000{line=line[:4000];truncated=true};lines=append(lines,line)}}
+  data=data[8+size:];if len(lines)>=limit{break}
+ }
+ if len(lines)==0 && len(data)>0{for _,line:=range strings.Split(strings.TrimSpace(string(data)),"\n"){if line==""{continue};if len(line)>4000{line=line[:4000];truncated=true};lines=append(lines,line);if len(lines)>=limit{break}}}
+ if len(lines)>limit{lines=lines[len(lines)-limit:]}
+ return lines,truncated,nil
+}
+
 func containerAction(id,action string)error{
  if !dockerID.MatchString(id){return errors.New("Invalid container ID")}
  method,path:=http.MethodPost,""
@@ -91,6 +173,15 @@ func executeCommand(command agentCommand)commandResult{
   if len(command.Payload)>0&&string(command.Payload)!="{}"{result.Error="Unexpected payload";return result};data,err:=listContainers();if err!=nil{result.Error=err.Error();return result};result.Data=data
  case "docker.listComposeProjects":
   if len(command.Payload)>0&&string(command.Payload)!="{}"{result.Error="Unexpected payload";return result};data,err:=listComposeProjects();if err!=nil{result.Error=err.Error();return result};result.Data=data
+ case "docker.inspectContainer":
+  var payload struct{ContainerID string `json:"containerId"`};if err:=decodeStrict(command.Payload,&payload);err!=nil||!dockerID.MatchString(payload.ContainerID){result.Error="Invalid container ID";return result}
+  data,err:=inspectContainer(payload.ContainerID);if err!=nil{result.Error=err.Error();return result};result.Data=data
+ case "docker.getContainerStats":
+  var payload struct{ContainerID string `json:"containerId"`};if err:=decodeStrict(command.Payload,&payload);err!=nil||!dockerID.MatchString(payload.ContainerID){result.Error="Invalid container ID";return result}
+  data,err:=getContainerStats(payload.ContainerID);if err!=nil{result.Error=err.Error();return result};result.Data=data
+ case "docker.tailContainerLogs":
+  var payload struct{ContainerID string `json:"containerId"`;Limit int `json:"limit"`};if err:=decodeStrict(command.Payload,&payload);err!=nil||!dockerID.MatchString(payload.ContainerID)||payload.Limit<1||payload.Limit>500{result.Error="Invalid log request";return result}
+  lines,truncated,err:=tailContainerLogs(payload.ContainerID,payload.Limit);if err!=nil{result.Error=err.Error();return result};result.Data=map[string]any{"lines":lines,"truncated":truncated}
  case "docker.startContainer","docker.stopContainer","docker.restartContainer","docker.pauseContainer","docker.unpauseContainer","docker.removeContainer":
   var payload struct{ContainerID string `json:"containerId"`};if err:=decodeStrict(command.Payload,&payload);err!=nil||!dockerID.MatchString(payload.ContainerID){result.Error="Invalid container ID";return result}
   action:=strings.TrimPrefix(command.Action,"docker.");action=strings.TrimSuffix(action,"Container")
