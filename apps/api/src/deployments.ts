@@ -75,6 +75,14 @@ const rollbackResult=z.object({
   containerId:z.string().regex(/^[a-f0-9]{12,64}$/i),
   rolledBackContainerId:z.string().regex(/^[a-f0-9]{12,64}$/i)
 }).strict();
+const composeContainerMap=z.record(
+  z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/),
+  z.string().regex(/^[a-f0-9]{12,64}$/i)
+);
+const composeRollbackResult=z.object({
+  composeContainerIds:composeContainerMap,
+  rolledBackComposeContainerIds:composeContainerMap
+}).strict();
 
 export function parseDeploymentIdempotencyKey(value:unknown){
   return idempotencyKey.parse(value);
@@ -195,6 +203,7 @@ export async function deploymentRoutes(app:FastifyInstance){
     rollbackBody.parse(request.body);
     const deployment=await pool.query(
       `SELECT d.id,d.state,d.deployment_type,d.container_name,d.container_id,d.previous_container_id,
+              d.compose_project,d.compose_container_ids,d.previous_compose_container_ids,
               a.organization_id,a.server_id
        FROM deployments d
        JOIN applications a ON a.id=d.application_id
@@ -205,10 +214,66 @@ export async function deploymentRoutes(app:FastifyInstance){
     const row=deployment.rows[0];
     await membership(userId,row.organization_id,'deployment.manage');
     if(row.state!=='successful')throw Object.assign(new Error('Only a successful deployment can be rolled back'),{statusCode:409});
-    if(row.deployment_type!=='dockerfile'||!row.container_name||!row.container_id||!row.previous_container_id||!row.server_id){
+    if(!row.server_id)throw Object.assign(new Error('Deployment target server is unavailable'),{statusCode:409});
+
+    if(row.deployment_type==='compose'){
+      const current=composeContainerMap.safeParse(row.compose_container_ids);
+      const previous=composeContainerMap.safeParse(row.previous_compose_container_ids);
+      if(!row.compose_project||!current.success||!previous.success||Object.keys(previous.data).length===0){
+        throw Object.assign(new Error('This Compose deployment does not have a restorable previous project'),{statusCode:409});
+      }
+      await audit(row.organization_id,userId,'deployment.rollback.requested','deployment',deploymentId,request.ip,{
+        deploymentType:'compose',
+        composeProject:row.compose_project,
+        services:Object.keys(current.data).sort()
+      });
+      let restored;
+      try{
+        restored=composeRollbackResult.parse(await sendAgentCommand(
+          row.server_id,
+          'deployment.rollbackCompose',
+          {
+            deploymentId,
+            composeProject:row.compose_project,
+            currentComposeContainerIds:current.data,
+            previousComposeContainerIds:previous.data
+          },
+          5*60_000
+        ));
+      }catch(error){
+        const reason=error instanceof Error?error.message:'Compose rollback failed';
+        await audit(row.organization_id,userId,'deployment.rollback.failed','deployment',deploymentId,request.ip,{
+          deploymentType:'compose',
+          reason:reason.slice(0,200)
+        });
+        throw Object.assign(new Error('Compose rollback failed on target agent'),{statusCode:502});
+      }
+      const updated=await transaction(async db=>{
+        const transitioned=await transitionDeployment(deploymentId,'rolled-back',{message:'Previous Compose project restored and readiness verified'},db);
+        await db.query(
+          `UPDATE deployments
+           SET compose_container_ids=$2::jsonb,previous_compose_container_ids=$3::jsonb
+           WHERE id=$1`,
+          [deploymentId,JSON.stringify(restored.composeContainerIds),JSON.stringify(restored.rolledBackComposeContainerIds)]
+        );
+        await audit(row.organization_id,userId,'deployment.rollback.completed','deployment',deploymentId,request.ip,{
+          deploymentType:'compose',
+          activeServices:Object.keys(restored.composeContainerIds).sort()
+        },db);
+        return transitioned;
+      });
+      return {
+        ...updated,
+        composeContainerIds:restored.composeContainerIds,
+        previousComposeContainerIds:restored.rolledBackComposeContainerIds
+      };
+    }
+
+    if(row.deployment_type!=='dockerfile'||!row.container_name||!row.container_id||!row.previous_container_id){
       throw Object.assign(new Error('This deployment does not have a restorable previous container'),{statusCode:409});
     }
     await audit(row.organization_id,userId,'deployment.rollback.requested','deployment',deploymentId,request.ip,{
+      deploymentType:'dockerfile',
       currentContainerId:row.container_id,
       previousContainerId:row.previous_container_id
     });
@@ -227,7 +292,10 @@ export async function deploymentRoutes(app:FastifyInstance){
       ));
     }catch(error){
       const reason=error instanceof Error?error.message:'Rollback failed';
-      await audit(row.organization_id,userId,'deployment.rollback.failed','deployment',deploymentId,request.ip,{reason:reason.slice(0,200)});
+      await audit(row.organization_id,userId,'deployment.rollback.failed','deployment',deploymentId,request.ip,{
+        deploymentType:'dockerfile',
+        reason:reason.slice(0,200)
+      });
       throw Object.assign(new Error('Rollback failed on target agent'),{statusCode:502});
     }
     const updated=await transaction(async db=>{
@@ -239,6 +307,7 @@ export async function deploymentRoutes(app:FastifyInstance){
         [deploymentId,restored.containerId,restored.rolledBackContainerId]
       );
       await audit(row.organization_id,userId,'deployment.rollback.completed','deployment',deploymentId,request.ip,{
+        deploymentType:'dockerfile',
         activeContainerId:restored.containerId,
         rolledBackContainerId:restored.rolledBackContainerId
       },db);
@@ -270,7 +339,7 @@ export async function deploymentRoutes(app:FastifyInstance){
     const {deploymentId}=z.object({deploymentId:uuid}).parse(request.params);
     const deployment=await pool.query(
       `SELECT d.id,d.application_id,a.organization_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id,
-              d.requested_by,d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project,d.image_ref,d.container_id,d.previous_container_id
+              d.requested_by,d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project,d.image_ref,d.container_id,d.previous_container_id,d.compose_container_ids,d.previous_compose_container_ids
        FROM deployments d
        JOIN applications a ON a.id=d.application_id
        WHERE d.id=$1`,
