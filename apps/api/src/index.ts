@@ -9,8 +9,11 @@ import { authRoutes } from './auth.js';
 import { serverRoutes } from './servers.js';
 import { agentRoutes } from './agent.js';
 import {dockerRoutes} from './docker.js';
+import {serviceRoutes} from './services.js';
+import {logRoutes} from './logs.js';
 import './security.js';
 import { startOfflineSweep } from './offline.js';
+
 export function buildApp() {
   const app = Fastify({logger:{redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie','body.password','body.token','body.credential']},bodyLimit:65536,trustProxy:false});
   app.register(cors,{origin:process.env.APP_ORIGIN ?? 'http://localhost:3000',credentials:true});
@@ -32,8 +35,11 @@ export function buildApp() {
   app.register(serverRoutes,{prefix:'/api/v1'});
   app.register(agentRoutes,{prefix:'/api/v1/agent'});
   app.register(dockerRoutes,{prefix:'/api/v1'});
+  app.register(serviceRoutes,{prefix:'/api/v1'});
+  app.register(logRoutes,{prefix:'/api/v1'});
   return app;
 }
+
 if (process.env.NODE_ENV !== 'test') {
   const app=buildApp();
   await app.listen({host:'0.0.0.0',port:Number(process.env.PORT ?? 4000)});

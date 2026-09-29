@@ -1,16 +1,19 @@
 # CloudDeck
 
-CloudDeck brings server inventory, operational status, and agent metrics into one workspace. This repository is an **early functional foundation**. It is not yet suitable for managing production hosts: remote actions, alerts, notifications, backups, deployment, terminal, and mobile are tracked in the roadmap below.
+CloudDeck is a multi-server operations and observability platform that combines monitoring, Docker operations, Linux service control, logs, deployments, uptime, backups, alerts and secure remote access in one workspace. The repository is being built phase-by-phase with production safety constraints rather than placeholder buttons.
 
 ![Dashboard screenshot placeholder](docs/dashboard-placeholder.svg)
 
 ## Implemented
 
-- Next.js responsive dashboard with a clearly labeled four-server demo preview, sign in, registration, real workspace listing, server creation, server metrics detail, and pairing token display.
-- Fastify API with PostgreSQL migrations, Argon2id passwords, short-lived JWTs, rotating/revocable refresh cookie, personal and team workspaces, role authorization, audit records, session listing/revocation, and email verification/password reset through SMTP.
-- Go Linux agent with outbound authenticated WebSocket, one-time 10-minute pairing, heartbeat samples, CPU/RAM/disk/load/network telemetry, reconnect, and 0600 credential file. API aggregates metric samples into minute buckets.
-- Docker container inventory and audited restart through a typed agent command. The Docker socket is opt-in; no generic command execution or environment variable inspection is exposed.
-- Docker Compose for web, API, PostgreSQL, Redis and GitHub Actions checks for Node and Go.
+- Next.js responsive dashboard with demo servers, authentication flows, workspace inventory, server onboarding, server detail metrics, and Docker controls.
+- Fastify API with PostgreSQL migrations, Argon2id passwords, short-lived JWTs, rotating/revocable refresh cookies, personal/team workspaces, RBAC, audit logs, session management, verification and reset flows.
+- Go Linux agent with outbound authenticated WebSocket, one-time pairing, heartbeat telemetry, CPU/RAM/disk/load/network metrics, reconnect and protected credential storage.
+- Metric aggregation into one-minute PostgreSQL buckets instead of persisting every realtime event.
+- Docker container inventory and audited restart through typed agent commands.
+- systemd service inventory plus audited start/stop/restart actions. Unit names are strictly validated and no shell command endpoint exists.
+- Bounded systemd journal tail retrieval (up to 500 lines / 256 KiB) with read auditing. True live streaming is intentionally deferred to a dedicated subscription protocol.
+- Docker Compose local stack and GitHub Actions checks for Node and Go.
 
 ## Architecture
 
@@ -18,28 +21,39 @@ CloudDeck brings server inventory, operational status, and agent metrics into on
 flowchart LR
   Web[Next.js dashboard] --> API[Fastify API]
   API --> PG[(PostgreSQL)]
-  API --> Redis[(Redis: reserved for jobs)]
-  Agent[Go agent on host] -->|Outbound TLS WebSocket| API
+  API --> Redis[(Redis: jobs / future distributed realtime)]
+  Agent[Go agent on managed host] -->|Outbound TLS WebSocket| API
+  Agent --> Docker[Docker Engine Unix socket]
+  Agent --> Systemd[systemd / journald]
 ```
 
-The Redis service is provisioned but not used yet. No arbitrary command execution endpoint exists. Future operations must be implemented as individually authorized and audited typed actions.
+CloudDeck does not expose an unrestricted remote command API. Every non-terminal agent action must be explicitly typed, validated, authorized and auditable.
 
 ## Local development
 
-Requires Node 22, npm 11, PostgreSQL 17, and Go 1.23 for the agent. Copy `.env.example` to `.env`, set a random 32+ byte `JWT_SECRET`, and provision the matching PostgreSQL database. Export the environment from `.env` into the process before using the commands below.
+Requires Node 22, npm 11, PostgreSQL 17, and Go 1.23.
 
 ```bash
+cp .env.example .env
 npm ci
 npm run migrate
 npm run dev
 npm run dev:web
 ```
 
-Open `http://localhost:3000` for the demo. Register to create a personal workspace. API runs on `localhost:4000`. Run `npm run typecheck`, `npm test`, and `npm run build` before changes.
+Before opening a PR run:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+cd services/agent && go test ./... && go build ./...
+```
 
 ## Pair an agent
 
-Create a server in the signed-in dashboard and copy the server ID and pairing token from the API response. The dashboard displays both values once. Build and install the agent on a Linux server (Go 1.23 required):
+Create a server in the dashboard and use its server ID and one-time pairing token:
 
 ```bash
 cd services/agent
@@ -49,21 +63,19 @@ sudo env CLOUDDECK_API_URL=https://api.example.com CLOUDDECK_SERVER_ID=<server-u
 unset CLOUDDECK_PAIRING_TOKEN
 ```
 
-Replace the API URL and UUID with the values from your deployment and dashboard. The installer pairs once, saves the credential in a 0600 file, and starts a dedicated `clouddeck` systemd service without storing the pairing token. Docker access is opt-in: add the service user to the local Docker group and set `CLOUDDECK_DOCKER_SOCKET=/var/run/docker.sock` in `/etc/clouddeck-agent/agent.env` only if inventory/restart is needed. Docker group membership grants root-equivalent host privileges. Restart the service after changing that setting. See [agent protocol](docs/AGENT_PROTOCOL.md). Use a TLS reverse proxy outside local development.
+The installer pairs once, saves the long-lived credential in a 0600 file and starts a dedicated systemd service. Docker access is opt-in via `CLOUDDECK_DOCKER_SOCKET=/var/run/docker.sock`; Docker group membership is effectively root-equivalent. systemd service control also requires the local CloudDeck service account to have only the specific sudo/polkit permissions needed in the deployment. Do not grant unrestricted passwordless sudo.
 
-## Production deployment
-
-See [deployment guide](docs/DEPLOYMENT.md). The Compose stack includes Mailpit for local email testing at `http://localhost:8025`. Configure a real SMTP provider and sender identity for production.
+See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [architecture](docs/ARCHITECTURE.md), and [deployment](docs/DEPLOYMENT.md).
 
 ## Roadmap
 
-1. **Foundation (partial):** auth, organizations, database, dashboard. Pending: TOTP, member management, fuller integration tests.
-2. **Agent (partial):** pairing, outbound telemetry, minute buckets. Pending: hardening, system service packaging, distributed heartbeat sweep, realtime fan-out.
-3. **Docker (partial):** container inventory and restart. Pending: start/stop/pause/remove, inspect, Compose, systemd and streaming logs.
-4. Browser terminal with dedicated permission and session limits.
-5. GitHub App, deployment pipeline and rollback.
+1. Foundation: auth, organizations, database, dashboard — functional baseline.
+2. Agent: pairing, heartbeat, telemetry, metric aggregation — functional baseline; distributed connection routing still pending.
+3. Operations: Docker inventory/restart, systemd inventory/actions, bounded journal logs — in progress. Next: full container lifecycle, Compose detection, resource usage and dedicated realtime log subscriptions.
+4. Browser terminal with dedicated permission, PTY lifecycle and session limits.
+5. GitHub App, deployment state machine, health activation and rollback.
 6. Health checks, alert rules and email/in-app notifications.
 7. Caddy/Nginx domains, encrypted secrets, verified backups and restore.
-8. Flutter monitoring and emergency actions.
+8. Flutter monitoring and emergency-operation mobile app.
 
-No UI button claims that a pending operation was performed. See [architecture](docs/ARCHITECTURE.md) and [security](docs/SECURITY.md).
+No UI or API response claims a pending feature was performed.
