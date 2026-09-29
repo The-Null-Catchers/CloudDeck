@@ -1,5 +1,6 @@
 import type {FastifyInstance} from 'fastify';
 import {z} from 'zod';
+import {SignJWT,importPKCS8} from 'jose';
 import {pool,transaction} from './db.js';
 import {authenticate,membership,audit,digest,randomToken} from './security.js';
 
@@ -11,6 +12,14 @@ const setupQuery=z.object({
   setup_action:z.string().max(40).optional()
 }).strict();
 const oauthQuery=z.object({state:z.string().min(20).max(200),code:z.string().min(8).max(500)}).strict();
+const repositoryParams=z.object({orgId:uuid,connectionId:uuid});
+const pageQuery=z.object({page:z.coerce.number().int().min(1).max(1000).default(1),perPage:z.coerce.number().int().min(1).max(100).default(50)}).strict();
+const repoParams=z.object({
+  orgId:uuid,
+  connectionId:uuid,
+  owner:z.string().regex(/^[A-Za-z0-9-]{1,100}$/),
+  repo:z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/)
+});
 const installationSchema=z.object({
   id:z.number().int().positive(),
   account:z.object({login:z.string().min(1).max(255),type:z.string().min(1).max(50)}),
@@ -66,6 +75,61 @@ async function exchangeUserToken(code:string){
   const body=z.object({access_token:z.string().min(1).optional(),error:z.string().optional()}).parse(await response.json());
   if(!body.access_token)throw Object.assign(new Error('GitHub authorization was not granted'),{statusCode:401});
   return body.access_token;
+}
+
+
+let appKeyPromise:ReturnType<typeof importPKCS8>|null=null;
+function appAuthConfig(){
+  const base=config();
+  const privateKey=process.env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g,'\n');
+  if(!privateKey)throw Object.assign(new Error('GitHub App private key is not configured'),{statusCode:503});
+  return {...base,privateKey};
+}
+async function githubAppJwt(){
+  const {clientId,privateKey}=appAuthConfig();
+  appKeyPromise??=importPKCS8(privateKey,'RS256');
+  const key=await appKeyPromise;
+  const now=Math.floor(Date.now()/1000);
+  return new SignJWT({})
+    .setProtectedHeader({alg:'RS256'})
+    .setIssuedAt(now-60)
+    .setExpirationTime(now+9*60)
+    .setIssuer(clientId)
+    .sign(key);
+}
+async function createInstallationToken(installationId:number){
+  const jwt=await githubAppJwt();
+  const response=await fetch(`https://api.github.com/app/installations/${installationId}/access_tokens`,{
+    method:'POST',
+    headers:{
+      Accept:'application/vnd.github+json',
+      Authorization:`Bearer ${jwt}`,
+      'X-GitHub-Api-Version':'2026-03-10',
+      'User-Agent':'CloudDeck'
+    }
+  });
+  if(!response.ok)throw Object.assign(new Error('GitHub installation token request failed'),{statusCode:502});
+  const body=z.object({token:z.string().min(1),expires_at:z.string()}).parse(await response.json());
+  return body.token;
+}
+async function linkedInstallation(orgId:string,connectionId:string){
+  const result=await pool.query(
+    'SELECT id,installation_id,account_login FROM github_installations WHERE id=$1 AND organization_id=$2',
+    [connectionId,orgId]
+  );
+  if(!result.rowCount)throw Object.assign(new Error('GitHub installation link not found'),{statusCode:404});
+  return {id:result.rows[0].id as string,installationId:Number(result.rows[0].installation_id),accountLogin:result.rows[0].account_login as string};
+}
+async function installationRequest(installationId:number,url:string){
+  const token=await createInstallationToken(installationId);
+  return fetch(url,{
+    headers:{
+      Accept:'application/vnd.github+json',
+      Authorization:`Bearer ${token}`,
+      'X-GitHub-Api-Version':'2026-03-10',
+      'User-Agent':'CloudDeck'
+    }
+  });
 }
 
 async function findAccessibleInstallation(token:string,installationId:number){
@@ -164,6 +228,50 @@ export async function githubRoutes(app:FastifyInstance){
       [orgId]
     );
     return {installations:rows.rows};
+  });
+
+  app.get('/organizations/:orgId/github/installations/:connectionId/repositories',async request=>{
+    const {userId}=await authenticate(request);
+    const {orgId,connectionId}=repositoryParams.parse(request.params);
+    const {page,perPage}=pageQuery.parse(request.query);
+    await membership(userId,orgId,'deployment.read');
+    const installation=await linkedInstallation(orgId,connectionId);
+    const response=await installationRequest(
+      installation.installationId,
+      `https://api.github.com/installation/repositories?per_page=${perPage}&page=${page}`
+    );
+    if(!response.ok)throw Object.assign(new Error('Unable to list GitHub repositories'),{statusCode:response.status===404?404:502});
+    const payload=z.object({
+      total_count:z.number().int().nonnegative(),
+      repositories:z.array(z.object({
+        id:z.number().int().positive(),
+        name:z.string(),
+        full_name:z.string(),
+        private:z.boolean(),
+        archived:z.boolean().optional(),
+        disabled:z.boolean().optional(),
+        default_branch:z.string()
+      })).max(100)
+    }).parse(await response.json());
+    return {page,perPage,total:payload.total_count,repositories:payload.repositories};
+  });
+
+  app.get('/organizations/:orgId/github/installations/:connectionId/repositories/:owner/:repo/branches',async request=>{
+    const {userId}=await authenticate(request);
+    const {orgId,connectionId,owner,repo}=repoParams.parse(request.params);
+    const {page,perPage}=pageQuery.parse(request.query);
+    await membership(userId,orgId,'deployment.read');
+    const installation=await linkedInstallation(orgId,connectionId);
+    const response=await installationRequest(
+      installation.installationId,
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?per_page=${perPage}&page=${page}`
+    );
+    if(!response.ok)throw Object.assign(new Error('Unable to list GitHub branches'),{statusCode:response.status===404?404:502});
+    const branches=z.array(z.object({
+      name:z.string().min(1).max(255),
+      commit:z.object({sha:z.string().regex(/^[a-f0-9]{40}$/i)})
+    })).max(100).parse(await response.json());
+    return {page,perPage,branches};
   });
 
   app.delete('/organizations/:orgId/github/installations/:connectionId',async request=>{

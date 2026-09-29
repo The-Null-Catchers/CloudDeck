@@ -33,9 +33,13 @@ Configure:
 - `GITHUB_APP_CLIENT_ID`
 - `GITHUB_APP_CLIENT_SECRET`
 - `GITHUB_APP_OAUTH_CALLBACK_URL`
+- `GITHUB_APP_PRIVATE_KEY`
 
 Set the GitHub App **Setup URL** to `<PUBLIC_API_URL>/api/v1/github/setup` and its OAuth callback URL to the configured `GITHUB_APP_OAUTH_CALLBACK_URL`.
 
 The connection flow is deliberately two-step. The install URL carries a random state token tied to a CloudDeck workspace/user. The setup callback records the candidate `installation_id`, then redirects through GitHub OAuth. CloudDeck exchanges the short-lived authorization code, calls `GET /user/installations`, and only links the candidate if that installation is visible to the authorizing GitHub user. The GitHub user access token is used only for that verification request and is never written to PostgreSQL or logs.
 
 Local disconnect removes the CloudDeck link only; it does not uninstall the GitHub App from GitHub. Repository listing and installation-token generation are a separate follow-up and will use installation-scoped credentials rather than stored user tokens.
+
+
+Repository and branch discovery use short-lived installation access tokens generated from a GitHub App JWT signed with `RS256`. The private key remains server-side in `GITHUB_APP_PRIVATE_KEY`; installation tokens are generated on demand, used for a single GitHub API request, and never stored. Repository listing uses `GET /installation/repositories`; branch listing uses the linked installation token against the selected repository.
