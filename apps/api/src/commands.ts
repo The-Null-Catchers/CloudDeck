@@ -67,3 +67,29 @@ export function resolveAgentStream(serverId:string,message:unknown):boolean{
   handler(parsed.data);if(parsed.data.done||parsed.data.error)unregisterAgentStream(serverId,parsed.data.subscriptionId);
   return true;
 }
+
+type TerminalHandler=(message:{sessionId:string;data?:string;exitCode?:number;error?:string;closed?:boolean})=>void;
+const terminals=new Map<string,Map<string,TerminalHandler>>();
+export function registerAgentTerminal(serverId:string,sessionId:string,handler:TerminalHandler){
+  let sessions=terminals.get(serverId);if(!sessions){sessions=new Map();terminals.set(serverId,sessions);}
+  if(sessions.size>=4)throw Object.assign(new Error('Too many terminal sessions'),{statusCode:429});
+  sessions.set(sessionId,handler);
+}
+export function unregisterAgentTerminal(serverId:string,sessionId:string){
+  const sessions=terminals.get(serverId);sessions?.delete(sessionId);if(sessions?.size===0)terminals.delete(serverId);
+}
+export function resolveAgentTerminal(serverId:string,message:unknown):boolean{
+  const parsed=z.object({
+    type:z.literal('terminal.data'),
+    sessionId:z.uuid(),
+    data:z.string().max(16384).optional(),
+    exitCode:z.number().int().min(-1).max(255).optional(),
+    error:z.string().max(200).optional(),
+    closed:z.boolean().optional()
+  }).safeParse(message);
+  if(!parsed.success)return false;
+  const handler=terminals.get(serverId)?.get(parsed.data.sessionId);if(!handler)return false;
+  handler(parsed.data);
+  if(parsed.data.closed||parsed.data.error)unregisterAgentTerminal(serverId,parsed.data.sessionId);
+  return true;
+}
