@@ -2,7 +2,8 @@ import type {FastifyInstance} from 'fastify';
 import type pg from 'pg';
 import {z} from 'zod';
 import {pool,transaction} from './db.js';
-import {authenticate,membership} from './security.js';
+import {authenticate,membership,audit} from './security.js';
+import {verifyGitHubSource} from './github.js';
 
 export const deploymentStates=['queued','cloning','building','deploying','health-checking','successful','failed','rolled-back'] as const;
 export type DeploymentState=typeof deploymentStates[number];
@@ -66,15 +67,96 @@ export async function transitionDeployment(
 
 const uuid=z.uuid();
 const listQuery=z.object({limit:z.coerce.number().int().min(1).max(100).default(50)}).strict();
+const idempotencyKey=z.string().trim().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/);
+
+export function parseDeploymentIdempotencyKey(value:unknown){
+  return idempotencyKey.parse(value);
+}
 
 export async function deploymentRoutes(app:FastifyInstance){
+  app.post('/applications/:applicationId/deployments',async (request,reply)=>{
+    const {userId}=await authenticate(request);
+    const {applicationId}=z.object({applicationId:uuid}).parse(request.params);
+    const requestKey=parseDeploymentIdempotencyKey(request.headers['idempotency-key']);
+    const application=await pool.query(
+      `SELECT id,organization_id,github_installation_id,repository_full_name,branch,deployment_type,source_path
+       FROM applications
+       WHERE id=$1`,
+      [applicationId]
+    );
+    if(!application.rowCount)throw Object.assign(new Error('Application not found'),{statusCode:404});
+    const sourceConfig=application.rows[0];
+    await membership(userId,sourceConfig.organization_id,'deployment.manage');
+
+    const source=await verifyGitHubSource(
+      sourceConfig.organization_id,
+      sourceConfig.github_installation_id,
+      sourceConfig.repository_full_name,
+      sourceConfig.branch,
+      sourceConfig.source_path
+    );
+
+    const created=await transaction(async db=>{
+      const inserted=await db.query(
+        `INSERT INTO deployments(
+           application_id,commit_sha,branch,state,requested_by,idempotency_key,
+           github_installation_id,repository_full_name,deployment_type,source_path
+         )
+         VALUES($1,$2,$3,'queued',$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (application_id,idempotency_key) WHERE idempotency_key IS NOT NULL
+         DO NOTHING
+         RETURNING id,application_id,commit_sha,branch,state,created_at,requested_by,
+                   github_installation_id,repository_full_name,deployment_type,source_path`,
+        [
+          applicationId,
+          source.commitSha,
+          sourceConfig.branch,
+          userId,
+          requestKey,
+          source.connectionId,
+          sourceConfig.repository_full_name,
+          sourceConfig.deployment_type,
+          source.sourcePath
+        ]
+      );
+      if(inserted.rowCount){
+        await db.query(
+          `INSERT INTO deployment_events(deployment_id,state,message)
+           VALUES($1,'queued','Deployment requested and source commit pinned')`,
+          [inserted.rows[0].id]
+        );
+        await audit(sourceConfig.organization_id,userId,'deployment.request','deployment',inserted.rows[0].id,request.ip,{
+          applicationId,
+          repository:sourceConfig.repository_full_name,
+          branch:sourceConfig.branch,
+          commitSha:source.commitSha,
+          deploymentType:sourceConfig.deployment_type
+        },db);
+        return {deployment:inserted.rows[0],created:true};
+      }
+      const existing=await db.query(
+        `SELECT id,application_id,commit_sha,branch,state,created_at,requested_by,
+                github_installation_id,repository_full_name,deployment_type,source_path
+         FROM deployments
+         WHERE application_id=$1 AND idempotency_key=$2`,
+        [applicationId,requestKey]
+      );
+      if(!existing.rowCount)throw new Error('Idempotent deployment lookup failed');
+      return {deployment:existing.rows[0],created:false};
+    });
+
+    if(created.created)reply.code(201);
+    return created.deployment;
+  });
+
   app.get('/organizations/:orgId/deployments',async request=>{
     const {userId}=await authenticate(request);
     const {orgId}=z.object({orgId:uuid}).parse(request.params);
     const {limit}=listQuery.parse(request.query);
     await membership(userId,orgId,'deployment.read');
     const rows=await pool.query(
-      `SELECT d.id,d.application_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id
+      `SELECT d.id,d.application_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id,
+              d.repository_full_name,d.deployment_type,d.source_path
        FROM deployments d
        JOIN applications a ON a.id=d.application_id
        WHERE a.organization_id=$1
@@ -89,7 +171,8 @@ export async function deploymentRoutes(app:FastifyInstance){
     const {userId}=await authenticate(request);
     const {deploymentId}=z.object({deploymentId:uuid}).parse(request.params);
     const deployment=await pool.query(
-      `SELECT d.id,d.application_id,a.organization_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id
+      `SELECT d.id,d.application_id,a.organization_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id,
+              d.requested_by,d.repository_full_name,d.deployment_type,d.source_path
        FROM deployments d
        JOIN applications a ON a.id=d.application_id
        WHERE d.id=$1`,
