@@ -1,11 +1,11 @@
 import {Queue} from 'bullmq';
-import IORedis from 'ioredis';
+import {Redis} from 'ioredis';
 import {z} from 'zod';
 import {pool} from './db.js';
 
 export const deploymentQueueName='clouddeck-deployments';
 const deploymentJob=z.object({deploymentId:z.uuid()}).strict();
-let connection:IORedis|null=null;
+let connection:Redis|null=null;
 let queue:Queue|null=null;
 
 function redisUrl(){
@@ -18,7 +18,7 @@ function redisUrl(){
 
 function deploymentQueue(){
   if(queue)return queue;
-  connection=new IORedis(redisUrl(),{
+  connection=new Redis(redisUrl(),{
     maxRetriesPerRequest:1,
     enableOfflineQueue:false,
     connectTimeout:2000
