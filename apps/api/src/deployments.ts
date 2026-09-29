@@ -5,6 +5,7 @@ import {pool,transaction} from './db.js';
 import {authenticate,membership,audit} from './security.js';
 import {verifyGitHubSource} from './github.js';
 import {enqueueDeployment} from './deployment-queue.js';
+import {sendAgentCommand} from './commands.js';
 
 export const deploymentStates=['queued','cloning','building','deploying','health-checking','successful','failed','rolled-back'] as const;
 export type DeploymentState=typeof deploymentStates[number];
@@ -69,6 +70,11 @@ export async function transitionDeployment(
 const uuid=z.uuid();
 const listQuery=z.object({limit:z.coerce.number().int().min(1).max(100).default(50)}).strict();
 const idempotencyKey=z.string().trim().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/);
+const rollbackBody=z.object({confirm:z.literal(true)}).strict();
+const rollbackResult=z.object({
+  containerId:z.string().regex(/^[a-f0-9]{12,64}$/i),
+  rolledBackContainerId:z.string().regex(/^[a-f0-9]{12,64}$/i)
+}).strict();
 
 export function parseDeploymentIdempotencyKey(value:unknown){
   return idempotencyKey.parse(value);
@@ -185,6 +191,64 @@ export async function deploymentRoutes(app:FastifyInstance){
     return {...created.deployment,dispatch};
   });
 
+  app.post('/deployments/:deploymentId/rollback',async request=>{
+    const {userId}=await authenticate(request);
+    const {deploymentId}=z.object({deploymentId:uuid}).parse(request.params);
+    rollbackBody.parse(request.body);
+    const deployment=await pool.query(
+      `SELECT d.id,d.state,d.deployment_type,d.container_name,d.container_id,d.previous_container_id,
+              a.organization_id,a.server_id
+       FROM deployments d
+       JOIN applications a ON a.id=d.application_id
+       WHERE d.id=$1`,
+      [deploymentId]
+    );
+    if(!deployment.rowCount)throw Object.assign(new Error('Deployment not found'),{statusCode:404});
+    const row=deployment.rows[0];
+    await membership(userId,row.organization_id,'deployment.manage');
+    if(row.state!=='successful')throw Object.assign(new Error('Only a successful deployment can be rolled back'),{statusCode:409});
+    if(row.deployment_type!=='dockerfile'||!row.container_name||!row.container_id||!row.previous_container_id||!row.server_id){
+      throw Object.assign(new Error('This deployment does not have a restorable previous container'),{statusCode:409});
+    }
+    await audit(row.organization_id,userId,'deployment.rollback.requested','deployment',deploymentId,request.ip,{
+      currentContainerId:row.container_id,
+      previousContainerId:row.previous_container_id
+    });
+    let restored;
+    try{
+      restored=rollbackResult.parse(await sendAgentCommand(
+        row.server_id,
+        'deployment.rollback',
+        {
+          deploymentId,
+          containerName:row.container_name,
+          currentContainerId:row.container_id,
+          previousContainerId:row.previous_container_id
+        },
+        2*60_000
+      ));
+    }catch(error){
+      const reason=error instanceof Error?error.message:'Rollback failed';
+      await audit(row.organization_id,userId,'deployment.rollback.failed','deployment',deploymentId,request.ip,{reason:reason.slice(0,200)});
+      throw Object.assign(new Error('Rollback failed on target agent'),{statusCode:502});
+    }
+    const updated=await transaction(async db=>{
+      const transitioned=await transitionDeployment(deploymentId,'rolled-back',{message:'Previous container restored and readiness verified'},db);
+      await db.query(
+        `UPDATE deployments
+         SET container_id=$2,previous_container_id=$3
+         WHERE id=$1`,
+        [deploymentId,restored.containerId,restored.rolledBackContainerId]
+      );
+      await audit(row.organization_id,userId,'deployment.rollback.completed','deployment',deploymentId,request.ip,{
+        activeContainerId:restored.containerId,
+        rolledBackContainerId:restored.rolledBackContainerId
+      },db);
+      return transitioned;
+    });
+    return {...updated,containerId:restored.containerId,previousContainerId:restored.rolledBackContainerId};
+  });
+
   app.get('/organizations/:orgId/deployments',async request=>{
     const {userId}=await authenticate(request);
     const {orgId}=z.object({orgId:uuid}).parse(request.params);
@@ -208,7 +272,7 @@ export async function deploymentRoutes(app:FastifyInstance){
     const {deploymentId}=z.object({deploymentId:uuid}).parse(request.params);
     const deployment=await pool.query(
       `SELECT d.id,d.application_id,a.organization_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id,
-              d.requested_by,d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project
+              d.requested_by,d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project,d.image_ref,d.container_id,d.previous_container_id
        FROM deployments d
        JOIN applications a ON a.id=d.application_id
        WHERE d.id=$1`,
