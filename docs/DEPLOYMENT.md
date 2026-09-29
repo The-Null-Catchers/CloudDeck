@@ -134,7 +134,23 @@ The GitHub installation token is ephemeral, is not written to PostgreSQL, BullMQ
 
 The Agent downloads the pinned commit archive, rejects unsafe archive entries, applies file-count/size limits, builds through the Docker Engine API, and activates the configured runtime target. Existing containers are stopped and renamed before replacement. If create/start/readiness fails, the Agent removes the replacement and restores the previous container name/state before reporting failure. Successful deployments retain the previous container ID for the rollback workflow.
 
-Automated Docker Compose execution is deliberately rejected with HTTP 409 for now. CloudDeck will add a Compose-spec-aware executor separately rather than falling back to unrestricted shell execution or ad-hoc `docker compose` CLI calls.
+Docker Compose execution is handled by a Compose-spec-aware Agent path rather than a shell or `docker compose` CLI invocation.
+
+### Docker Compose deployment execution
+
+Compose applications use the same pinned GitHub source, BullMQ worker, typed progress, and Agent trust boundary as Dockerfile applications. The Agent parses the Compose YAML with strict field checking and currently supports a deliberately bounded production subset:
+
+- `image` or string `build` context
+- `ports`
+- map-form `environment`
+- `restart`
+- list-form `depends_on`
+
+Services are topologically ordered by dependencies. Public images are pulled through the Docker Engine API; build services are built from repository-local contexts. CloudDeck creates an isolated project default network and labels containers with standard Compose project/service metadata plus the deployment ID.
+
+The executor rejects dependency cycles, scaled pre-existing services, unsafe build paths, and unsupported features such as bind/named volumes, custom networks, `network_mode`, `privileged`, devices, custom command/entrypoint, and map-form advanced Compose constructs. Rejection is explicit; unsupported settings are never silently ignored.
+
+Existing project containers are stopped and renamed before replacement. If any service create/start/readiness step fails, the executor removes the partially created project and restores the previous project containers. Successful deployments persist service-to-container maps for later multi-service rollback support.
 
 
 ## One-click Dockerfile rollback
