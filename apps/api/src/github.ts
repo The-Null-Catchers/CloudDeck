@@ -132,6 +132,36 @@ async function installationRequest(installationId:number,url:string){
   });
 }
 
+export async function verifyGitHubSource(orgId:string,connectionId:string,repositoryFullName:string,branch:string,sourcePath:string){
+  const parts=repositoryFullName.split('/');
+  if(parts.length!==2||!/^[A-Za-z0-9-]{1,100}$/.test(parts[0])||!/^[A-Za-z0-9_.-]{1,100}$/.test(parts[1])){
+    throw Object.assign(new Error('Invalid GitHub repository name'),{statusCode:400});
+  }
+  if(!branch||branch.length>255)throw Object.assign(new Error('Invalid GitHub branch'),{statusCode:400});
+  const pathParts=sourcePath.split('/');
+  if(!sourcePath||sourcePath.startsWith('/')||sourcePath.length>240||pathParts.some(part=>!part||part==='.'||part==='..'||!/^[A-Za-z0-9._-]+$/.test(part))){
+    throw Object.assign(new Error('Invalid deployment source path'),{statusCode:400});
+  }
+  const installation=await linkedInstallation(orgId,connectionId);
+  const [owner,repo]=parts;
+  const branchResponse=await installationRequest(
+    installation.installationId,
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branch)}`
+  );
+  if(branchResponse.status===404)throw Object.assign(new Error('Repository or branch is not accessible through this GitHub installation'),{statusCode:400});
+  if(!branchResponse.ok)throw Object.assign(new Error('Unable to verify GitHub branch'),{statusCode:502});
+  const branchData=z.object({name:z.string(),commit:z.object({sha:z.string().regex(/^[a-f0-9]{40}$/i)})}).parse(await branchResponse.json());
+  const encodedPath=pathParts.map(encodeURIComponent).join('/');
+  const fileResponse=await installationRequest(
+    installation.installationId,
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`
+  );
+  if(fileResponse.status===404)throw Object.assign(new Error('Deployment source file was not found on the selected branch'),{statusCode:400});
+  if(!fileResponse.ok)throw Object.assign(new Error('Unable to verify deployment source file'),{statusCode:502});
+  const file=z.object({type:z.literal('file'),path:z.string(),sha:z.string()}).parse(await fileResponse.json());
+  return {commitSha:branchData.commit.sha,sourcePath:file.path,connectionId:installation.id};
+}
+
 async function findAccessibleInstallation(token:string,installationId:number){
   for(let page=1;page<=10;page++){
     const response=await fetch(`https://api.github.com/user/installations?per_page=100&page=${page}`,{
