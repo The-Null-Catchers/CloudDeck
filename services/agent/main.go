@@ -139,6 +139,10 @@ func connect(endpoint,credential string) error {
      go executeDeploymentRollbackCommand(ctx,command,write)
      continue
     }
+    if command.Action=="deployment.rollbackCompose"{
+     go executeComposeRollbackCommand(ctx,command,write)
+     continue
+    }
     if write(executeCommand(command))!=nil{return}
    case "stream.subscribe":
     var sub streamSubscribe
