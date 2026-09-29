@@ -188,3 +188,30 @@ CloudDeck sends the current and previous service-to-container maps to the typed 
 The Agent then stops and renames the current project aside, restores the previous service containers to their runtime names, starts them, and requires every restored service to pass running/health readiness. If restoration fails, it attempts to put the current project back before reporting failure.
 
 Only after Agent-side success does the API transition `successful -> rolled-back` and swap the persisted Compose container maps. Request, failure, and completion are audited with deployment type and service metadata.
+
+
+## GitHub push auto-deploy
+
+Applications can opt into branch-based automatic deployment with:
+
+`PUT /api/v1/applications/:applicationId/auto-deploy`
+
+Body:
+
+```json
+{"enabled":true}
+```
+
+Enabling requires `deployment.manage` and a complete runtime configuration.
+
+Configure the GitHub App webhook URL as:
+
+`<PUBLIC_API_URL>/api/v1/webhooks/github`
+
+and set the same strong secret in `GITHUB_WEBHOOK_SECRET`. The webhook endpoint consumes the raw JSON body and requires a valid `X-Hub-Signature-256` HMAC before parsing or performing database lookups.
+
+For signed `push` events CloudDeck matches applications by GitHub App installation ID, repository, and exact branch. It uses the pushed `after` commit SHA directly, verifies the configured Dockerfile/Compose source path at that exact commit, and creates a deployment snapshot without resolving the moving branch head again.
+
+Webhook delivery IDs and per-application idempotency keys make GitHub retries safe. Re-delivering the same push cannot create duplicate deployments. Non-push events, branch deletions, and unmatched branches are acknowledged without deployment. Source validation failures that indicate an invalid pushed source are audited as skipped auto-deploys; transient upstream failures are allowed to fail the webhook so GitHub can retry.
+
+The BullMQ job still contains only the deployment UUID. GitHub credentials remain short-lived and are minted later by the deployment worker.
