@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {canTransitionDeployment,deploymentStates,type DeploymentState} from '../src/deployments.ts';
+import {canTransitionDeployment,deploymentStates,parseDeploymentIdempotencyKey,type DeploymentState} from '../src/deployments.ts';
 
 test('deployment state machine allows only forward orchestration transitions',()=>{
   const allowed:[DeploymentState,DeploymentState][]=[
@@ -28,4 +28,13 @@ test('deployment state machine rejects skips, retries and terminal-state mutatio
   assert.equal(canTransitionDeployment('failed','queued'),false);
   assert.equal(canTransitionDeployment('rolled-back','queued'),false);
   assert.equal(canTransitionDeployment('successful','failed'),false);
+});
+
+
+test('deployment request idempotency keys are bounded and header-safe',()=>{
+  assert.equal(parseDeploymentIdempotencyKey('deploy-01:abc.DEF_123'),'deploy-01:abc.DEF_123');
+  assert.throws(()=>parseDeploymentIdempotencyKey('short'));
+  assert.throws(()=>parseDeploymentIdempotencyKey('contains spaces'));
+  assert.throws(()=>parseDeploymentIdempotencyKey(['duplicate','headers']));
+  assert.throws(()=>parseDeploymentIdempotencyKey('x'.repeat(129)));
 });
