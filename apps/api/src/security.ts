@@ -21,9 +21,9 @@ export async function authenticate(request: FastifyRequest) {
 }
 export const permissions = {
   viewer: new Set(['server.read', 'metrics.read', 'audit.read']),
-  operator: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action']),
-  admin: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage']),
-  owner: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage', 'org.delete'])
+  operator: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'terminal.access']),
+  admin: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage', 'terminal.access']),
+  owner: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage', 'org.delete', 'terminal.access'])
 } as const;
 export function can(role: keyof typeof permissions, permission: string) { return permissions[role].has(permission); }
 export async function membership(userId: string, orgId: string, permission: string) {
