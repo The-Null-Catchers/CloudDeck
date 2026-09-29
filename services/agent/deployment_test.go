@@ -26,7 +26,7 @@ func TestValidateDeploymentPayloadRejectsUnsafeValues(t *testing.T){
  tests:=[]func(*deploymentExecutePayload){
   func(p *deploymentExecutePayload){p.SourcePath="../Dockerfile"},
   func(p *deploymentExecutePayload){p.GithubToken="bad token"},
-  func(p *deploymentExecutePayload){p.DeploymentType="compose"},
+  func(p *deploymentExecutePayload){p.DeploymentType="compose";p.Runtime.ComposeProject=nil},
   func(p *deploymentExecutePayload){p.Runtime.ContainerName=ptrString("api;rm")},
   func(p *deploymentExecutePayload){p.Runtime.HostPort=ptrInt(70000)},
  }
@@ -55,4 +55,13 @@ func TestValidateRollbackPayloadRejectsUnsafeTargets(t *testing.T){
   func(p *deploymentRollbackPayload){p.PreviousContainerID=p.CurrentContainerID},
  }
  for i,mutate:=range tests{p:=validRollbackPayload();mutate(&p);if validateRollbackPayload(p)==nil{t.Fatalf("case %d should fail",i)}}
+}
+
+
+func TestValidateComposeDeploymentPayload(t *testing.T){
+ p:=validDeploymentPayload()
+ p.DeploymentType="compose"
+ p.SourcePath="compose.yml"
+ p.Runtime=deploymentRuntime{ComposeProject:ptrString("clouddeck-prod")}
+ if err:=validateDeploymentPayload(p);err!=nil{t.Fatalf("expected valid Compose payload: %v",err)}
 }
