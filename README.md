@@ -74,7 +74,7 @@ See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [arc
 2. Agent: pairing, heartbeat, telemetry, metric aggregation — functional baseline; distributed connection routing still pending.
 3. Operations: Docker lifecycle/inspection, Compose service controls, systemd management, bounded snapshots, and realtime Docker/systemd logs — functional baseline.
 4. Browser terminal — dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, a 30-minute limit, and xterm.js server-detail UI with automatic fitting/resize.
-5. Deployments — guarded state machine/read APIs plus verified GitHub App installation linking implemented; next: repository/branch selection, installation-scoped tokens, BullMQ execution, health activation, and rollback orchestration.
+5. Deployments — guarded state machine/read APIs, verified GitHub App linking, and installation-scoped repository/branch discovery implemented; next: application source configuration, BullMQ execution, health activation, and rollback orchestration.
 6. Health checks, alert rules and email/in-app notifications.
 7. Caddy/Nginx domains, encrypted secrets, verified backups and restore.
 8. Flutter monitoring and emergency-operation mobile app.
