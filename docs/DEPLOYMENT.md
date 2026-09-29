@@ -93,3 +93,23 @@ For Docker Compose applications, runtime configuration includes a strict Compose
 Runtime targets are unique per server where collisions would be unsafe: container names, published host ports, and Compose project names. Existing applications created before this schema can be completed through `PUT /api/v1/applications/:applicationId/runtime`.
 
 Every new deployment snapshots its runtime target together with the pinned source commit. Editing the application later therefore cannot silently mutate an already-created deployment or rollback record.
+
+
+## Durable deployment dispatch
+
+Deployment creation and Redis queue delivery are deliberately decoupled so a temporary Redis outage cannot lose a validated deployment request.
+
+After the PostgreSQL transaction commits, the API adds a BullMQ job to `clouddeck-deployments`. The job payload contains only the deployment UUID; repository metadata, runtime configuration, credentials, and secrets stay in PostgreSQL or are minted just-in-time by later execution stages.
+
+Queue jobs use the deployment UUID as the BullMQ job ID, making repeated dispatch idempotent while the job is retained. They use bounded exponential retries.
+
+If Redis is unavailable when a deployment is created:
+
+- the durable deployment remains in PostgreSQL with state `queued`
+- the API returns `dispatch: "pending"` instead of claiming queue delivery succeeded
+- an informational deployment event records the deferred dispatch
+- the API reconciler periodically scans queued deployments and retries BullMQ insertion
+
+When queue insertion succeeds the response reports `dispatch: "enqueued"`.
+
+This change provides durable dispatch and recovery only. State execution remains separate from queue delivery: a deployment is never advanced to `cloning`, `building`, or `successful` merely because BullMQ accepted the job.
