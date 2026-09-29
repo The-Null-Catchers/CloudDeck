@@ -177,3 +177,14 @@ Rollback is intentionally two-phase:
 6. Only after readiness succeeds does the API transition `successful -> rolled-back`, swap persisted container metadata, and append `deployment.rollback.completed`.
 
 If Agent-side restoration fails, the Agent attempts to restore the current container and CloudDeck records `deployment.rollback.failed`; the deployment remains `successful` because the requested rollback was not completed.
+
+
+## One-click Docker Compose rollback
+
+The existing confirmed rollback endpoint also supports successful Compose deployments when a previous project container map was preserved.
+
+CloudDeck sends the current and previous service-to-container maps to the typed `deployment.rollbackCompose` Agent action. Before changing anything, the Agent verifies that every currently named `<project>-<service>-1` container still matches the recorded current deployment IDs and that every previous container still exists.
+
+The Agent then stops and renames the current project aside, restores the previous service containers to their runtime names, starts them, and requires every restored service to pass running/health readiness. If restoration fails, it attempts to put the current project back before reporting failure.
+
+Only after Agent-side success does the API transition `successful -> rolled-back` and swap the persisted Compose container maps. Request, failure, and completion are audited with deployment type and service metadata.
