@@ -131,6 +131,10 @@ func connect(endpoint,credential string) error {
    case "command":
     var command agentCommand
     if json.Unmarshal(message,&command)!=nil{continue}
+    if command.Action=="deployment.execute"{
+     go executeDeploymentCommand(ctx,command,write)
+     continue
+    }
     if write(executeCommand(command))!=nil{return}
    case "stream.subscribe":
     var sub streamSubscribe
