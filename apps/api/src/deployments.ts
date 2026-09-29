@@ -4,6 +4,7 @@ import {z} from 'zod';
 import {pool,transaction} from './db.js';
 import {authenticate,membership,audit} from './security.js';
 import {verifyGitHubSource} from './github.js';
+import {enqueueDeployment} from './deployment-queue.js';
 
 export const deploymentStates=['queued','cloning','building','deploying','health-checking','successful','failed','rolled-back'] as const;
 export type DeploymentState=typeof deploymentStates[number];
@@ -166,8 +167,21 @@ export async function deploymentRoutes(app:FastifyInstance){
       return {deployment:existing.rows[0],created:false};
     });
 
+    let dispatch:'enqueued'|'pending'='enqueued';
+    try{
+      await enqueueDeployment(created.deployment.id as string);
+    }catch{
+      dispatch='pending';
+      if(created.created){
+        await pool.query(
+          `INSERT INTO deployment_events(deployment_id,state,message)
+           VALUES($1,'queued','Queue dispatch pending; automatic reconciliation will retry')`,
+          [created.deployment.id]
+        );
+      }
+    }
     if(created.created)reply.code(201);
-    return created.deployment;
+    return {...created.deployment,dispatch};
   });
 
   app.get('/organizations/:orgId/deployments',async request=>{

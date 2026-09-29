@@ -16,6 +16,7 @@ import {terminalRoutes} from './terminal.js';
 import {deploymentRoutes} from './deployments.js';
 import {githubRoutes} from './github.js';
 import {applicationRoutes} from './applications.js';
+import {startDeploymentQueueReconciler,closeDeploymentQueue} from './deployment-queue.js';
 import './security.js';
 import { startOfflineSweep } from './offline.js';
 
@@ -54,5 +55,10 @@ if (process.env.NODE_ENV !== 'test') {
   const app=buildApp();
   await app.listen({host:'0.0.0.0',port:Number(process.env.PORT ?? 4000)});
   const stopSweep=startOfflineSweep();
-  app.addHook('onClose',async()=>stopSweep());
+  const stopDeploymentQueueReconciler=startDeploymentQueueReconciler();
+  app.addHook('onClose',async()=>{
+    stopSweep();
+    stopDeploymentQueueReconciler();
+    await closeDeploymentQueue();
+  });
 }
