@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { pool, transaction } from './db.js';
 import { digest, randomToken } from './security.js';
-import {attachAgent,detachAgent,resolveAgentResult,resolveAgentStream} from './commands.js';
+import {attachAgent,detachAgent,resolveAgentResult,resolveAgentStream,resolveDeploymentProgress} from './commands.js';
 import {resolveAgentTerminal} from './terminal.js';
 const uuid = z.uuid();
 const sample = z.object({type:z.literal('metrics'),cpuPercent:z.number().min(0).max(100),memoryPercent:z.number().min(0).max(100),diskPercent:z.number().min(0).max(100),load1:z.number().min(0).max(100000),networkRxBytes:z.number().int().nonnegative(),networkTxBytes:z.number().int().nonnegative()});
@@ -37,6 +37,7 @@ export async function agentRoutes(app: FastifyInstance) {
       try { message=JSON.parse(raw.toString()); } catch {socket.close(1007,'Invalid JSON');return;}
       if ((message as {type?:unknown})?.type==='command.result') {if(!resolveAgentResult(serverId,message))socket.close(1007,'Unknown command result');lastMessage=Date.now();return;}
       if ((message as {type?:unknown})?.type==='stream.data') {if(!resolveAgentStream(serverId,message))socket.close(1007,'Unknown stream result');lastMessage=Date.now();return;}
+      if ((message as {type?:unknown})?.type==='deployment.progress') {if(!resolveDeploymentProgress(message))socket.close(1007,'Unknown deployment progress');lastMessage=Date.now();return;}
       if ((message as {type?:unknown})?.type==='terminal.data' || (message as {type?:unknown})?.type==='terminal.exit') {if(!resolveAgentTerminal(serverId,message))socket.close(1007,'Unknown terminal result');lastMessage=Date.now();return;}
       if(raw.length>8192){socket.close(1009,'Message too large');return;}
       const h = hello.safeParse(message);
