@@ -1,3 +1,4 @@
+import type pg from 'pg';
 import { randomBytes, createHash } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import type { FastifyRequest } from 'fastify';
@@ -32,6 +33,6 @@ export async function membership(userId: string, orgId: string, permission: stri
   if (!role || !can(role, permission)) throw Object.assign(new Error('Access denied'), {statusCode: 403});
   return role;
 }
-export async function audit(orgId: string | null, actorId: string | null, action: string, resourceType: string, resourceId: string | null, ip: string, metadata: object = {}) {
-  await pool.query('INSERT INTO audit_logs(organization_id,actor_id,action,resource_type,resource_id,ip,metadata) VALUES($1,$2,$3,$4,$5,$6,$7)', [orgId,actorId,action,resourceType,resourceId,ip,JSON.stringify(metadata)]);
+export async function audit(orgId: string | null, actorId: string | null, action: string, resourceType: string, resourceId: string | null, ip: string, metadata: object = {}, db: Pick<pg.PoolClient,'query'> | typeof pool = pool) {
+  await db.query('INSERT INTO audit_logs(organization_id,actor_id,action,resource_type,resource_id,ip,metadata) VALUES($1,$2,$3,$4,$5,$6,$7)', [orgId,actorId,action,resourceType,resourceId,ip,JSON.stringify(metadata)]);
 }
