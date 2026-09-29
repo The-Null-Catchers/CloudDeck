@@ -6,7 +6,9 @@ test('docker lifecycle uses explicit allowlisted actions',()=>{
   for(const action of [
     'docker.startContainer','docker.stopContainer','docker.restartContainer',
     'docker.pauseContainer','docker.unpauseContainer','docker.removeContainer',
-    'docker.listComposeProjects'
+    'docker.listComposeProjects',
+    'docker.startComposeService','docker.stopComposeService','docker.restartComposeService',
+    'docker.inspectContainer','docker.getContainerStats','docker.tailContainerLogs'
   ]) assert.ok((allowedActions as readonly string[]).includes(action));
   assert.equal((allowedActions as readonly string[]).includes('docker.exec'),false);
   assert.equal((allowedActions as readonly string[]).includes('docker.run'),false);

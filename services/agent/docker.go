@@ -25,6 +25,7 @@ type containerSummary struct {
 type composeProjectSummary struct {Name string `json:"name"`;Services []string `json:"services"`;Running int `json:"running"`;Total int `json:"total"`}
 
 var dockerID=regexp.MustCompile(`^[a-fA-F0-9]{12,64}$`)
+var composeName=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 
 func dockerClient() (*http.Client,error) {
  socket:=os.Getenv("CLOUDDECK_DOCKER_SOCKET");if socket==""{return nil,errors.New("Docker integration disabled on this agent")}
@@ -151,6 +152,26 @@ func tailContainerLogs(id string,limit int)([]string,bool,error){
  return lines,truncated,nil
 }
 
+func composeServiceContainers(project,service string)([]containerSummary,error){
+ if !composeName.MatchString(project)||!composeName.MatchString(service){return nil,errors.New("Invalid Compose project or service")}
+ containers,err:=listContainers();if err!=nil{return nil,err}
+ matches:=[]containerSummary{}
+ for _,container:=range containers{
+  if container.ComposeProject==project&&container.ComposeService==service{matches=append(matches,container)}
+ }
+ if len(matches)==0{return nil,errors.New("Compose service not found")}
+ return matches,nil
+}
+func composeServiceAction(project,service,action string)error{
+ containers,err:=composeServiceContainers(project,service);if err!=nil{return err}
+ for _,container:=range containers{
+  if action=="start"&&container.State=="running"{continue}
+  if action=="stop"&&container.State!="running"&&container.State!="paused"{continue}
+  if err:=containerAction(container.ID,action);err!=nil{return err}
+ }
+ return nil
+}
+
 func containerAction(id,action string)error{
  if !dockerID.MatchString(id){return errors.New("Invalid container ID")}
  method,path:=http.MethodPost,""
@@ -173,6 +194,10 @@ func executeCommand(command agentCommand)commandResult{
   if len(command.Payload)>0&&string(command.Payload)!="{}"{result.Error="Unexpected payload";return result};data,err:=listContainers();if err!=nil{result.Error=err.Error();return result};result.Data=data
  case "docker.listComposeProjects":
   if len(command.Payload)>0&&string(command.Payload)!="{}"{result.Error="Unexpected payload";return result};data,err:=listComposeProjects();if err!=nil{result.Error=err.Error();return result};result.Data=data
+ case "docker.startComposeService","docker.stopComposeService","docker.restartComposeService":
+  var payload struct{Project string `json:"project"`;Service string `json:"service"`};if err:=decodeStrict(command.Payload,&payload);err!=nil||!composeName.MatchString(payload.Project)||!composeName.MatchString(payload.Service){result.Error="Invalid Compose project or service";return result}
+  action:=strings.TrimSuffix(strings.TrimPrefix(command.Action,"docker."),"ComposeService")
+  if err:=composeServiceAction(payload.Project,payload.Service,action);err!=nil{result.Error=err.Error();return result};result.Data=map[string]bool{"ok":true}
  case "docker.inspectContainer":
   var payload struct{ContainerID string `json:"containerId"`};if err:=decodeStrict(command.Payload,&payload);err!=nil||!dockerID.MatchString(payload.ContainerID){result.Error="Invalid container ID";return result}
   data,err:=inspectContainer(payload.ContainerID);if err!=nil{result.Error=err.Error();return result};result.Data=data

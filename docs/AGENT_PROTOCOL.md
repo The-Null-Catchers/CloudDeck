@@ -17,20 +17,36 @@ Metrics are persisted into one-minute aggregate buckets. Missing messages beyond
 
 Every API-issued command has a UUID request ID, an allowlisted action, and a validated payload. The agent does not expose a generic shell/exec action.
 
-Current allowlist:
+Current allowlist includes explicit Docker inventory, lifecycle, inspection, and bounded log actions:
 
 - `docker.listContainers`
+- `docker.startContainer`
+- `docker.stopContainer`
 - `docker.restartContainer`
+- `docker.pauseContainer`
+- `docker.unpauseContainer`
+- `docker.removeContainer`
+- `docker.listComposeProjects`
+- `docker.startComposeService`
+- `docker.stopComposeService`
+- `docker.restartComposeService`
+- `docker.inspectContainer`
+- `docker.getContainerStats`
+- `docker.tailContainerLogs`
 - `systemd.listServices`
 - `systemd.startService`
 - `systemd.stopService`
 - `systemd.restartService`
 - `systemd.tailLogs`
 
+Compose operations resolve containers by `com.docker.compose.project` and `com.docker.compose.service` labels and then call the Docker Engine API. They do not invoke a shell or depend on the Docker Compose CLI. Project and service names are strictly validated. Container inspection intentionally excludes environment variables and command arguments.
+
 Examples:
 
 ```json
 {"type":"command","requestId":"<uuid>","action":"docker.restartContainer","payload":{"containerId":"<12-64 hex chars>"}}
+{"type":"command","requestId":"<uuid>","action":"docker.restartComposeService","payload":{"project":"clouddeck","service":"api"}}
+{"type":"command","requestId":"<uuid>","action":"docker.tailContainerLogs","payload":{"containerId":"<12-64 hex chars>","limit":200}}
 {"type":"command","requestId":"<uuid>","action":"systemd.restartService","payload":{"serviceName":"caddy.service"}}
 {"type":"command","requestId":"<uuid>","action":"systemd.tailLogs","payload":{"serviceName":"caddy.service","limit":200}}
 ```

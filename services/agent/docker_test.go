@@ -25,6 +25,8 @@ func TestDockerLifecycleAndCompose(t *testing.T){
 
  actions:=[]string{"start","stop","restart","pause","unpause","remove"}
  for i,a:=range actions{res:=executeCommand(agentCommand{Type:"command",RequestID:string(rune('a'+i)),Action:"docker."+a+"Container",Payload:json.RawMessage(`{"containerId":"aaaaaaaaaaaa"}`)});if !res.Success{t.Fatalf("%s failed: %s",a,res.Error)}}
+ composeStart:=executeCommand(agentCommand{Type:"command",RequestID:"compose",Action:"docker.startComposeService",Payload:json.RawMessage(`{"project":"clouddeck","service":"api"}`)});if !composeStart.Success{t.Fatalf("compose start failed: %s",composeStart.Error)}
+ invalidCompose:=executeCommand(agentCommand{Type:"command",RequestID:"bad-compose",Action:"docker.restartComposeService",Payload:json.RawMessage(`{"project":"../clouddeck","service":"api"}`)});if invalidCompose.Success{t.Fatal("unsafe Compose name accepted")}
  invalid:=executeCommand(agentCommand{Type:"command",RequestID:"x",Action:"docker.removeContainer",Payload:json.RawMessage(`{"containerId":"../etc/passwd"}`)});if invalid.Success{t.Fatal("unsafe ID accepted")}
  denied:=executeCommand(agentCommand{Type:"command",RequestID:"y",Action:"docker.exec",Payload:json.RawMessage(`{}`)});if denied.Success{t.Fatal("unlisted action accepted")}
 }
