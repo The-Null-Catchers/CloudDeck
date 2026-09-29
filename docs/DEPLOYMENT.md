@@ -21,3 +21,21 @@ successful -> rolled-back
 Skipping phases, retrying terminal states, or mutating a failed/rolled-back deployment is rejected. Every successful transition appends a `deployment_events` record. The deployment row records start/finish timestamps and a bounded failure code when applicable.
 
 The public API currently exposes deployment history/read endpoints only. Enqueueing and transition mutation stay internal until the BullMQ worker, GitHub source resolution, image build, agent deployment, health activation, and rollback orchestration are implemented together. This prevents queued records from pretending work is happening when no worker exists.
+
+
+## GitHub App connection
+
+CloudDeck uses a GitHub App installation flow rather than personal access tokens.
+
+Configure:
+
+- `GITHUB_APP_SLUG`
+- `GITHUB_APP_CLIENT_ID`
+- `GITHUB_APP_CLIENT_SECRET`
+- `GITHUB_APP_OAUTH_CALLBACK_URL`
+
+Set the GitHub App **Setup URL** to `<PUBLIC_API_URL>/api/v1/github/setup` and its OAuth callback URL to the configured `GITHUB_APP_OAUTH_CALLBACK_URL`.
+
+The connection flow is deliberately two-step. The install URL carries a random state token tied to a CloudDeck workspace/user. The setup callback records the candidate `installation_id`, then redirects through GitHub OAuth. CloudDeck exchanges the short-lived authorization code, calls `GET /user/installations`, and only links the candidate if that installation is visible to the authorizing GitHub user. The GitHub user access token is used only for that verification request and is never written to PostgreSQL or logs.
+
+Local disconnect removes the CloudDeck link only; it does not uninstall the GitHub App from GitHub. Repository listing and installation-token generation are a separate follow-up and will use installation-scoped credentials rather than stored user tokens.
