@@ -22,7 +22,7 @@ test('registration, workspace isolation, server pairing, and refresh rotation',a
   assert.equal(viewerRegister.statusCode,201);
   const viewerUser=await pool.query('SELECT id FROM users WHERE email=$1',[`viewer-${suffix}@example.com`]);
   await pool.query('INSERT INTO organization_members(organization_id,user_id,role) VALUES($1,$2,$3)',[organizationId,viewerUser.rows[0].id,'viewer']);
-  const viewerRestart=await app.inject({method:'POST',url:`/api/v1/servers/${server.id}/docker/containers/${'a'.repeat(64)}/restart`,headers:{authorization:`Bearer ${viewerRegister.json().accessToken}`},payload:{confirm:true}});
+  const viewerRestart=await app.inject({method:'POST',url:`/api/v1/servers/${server.id}/docker/containers/${'a'.repeat(64)}/action`,headers:{authorization:`Bearer ${viewerRegister.json().accessToken}`},payload:{action:'restart',confirm:true}});
   assert.equal(viewerRestart.statusCode,403);
   const pair=await app.inject({method:'POST',url:'/api/v1/agent/pair',payload:{serverId:server.id,token:server.pairingToken}});
   assert.equal(pair.statusCode,201,pair.body);
