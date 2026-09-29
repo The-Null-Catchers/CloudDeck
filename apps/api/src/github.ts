@@ -154,7 +154,7 @@ export async function verifyGitHubSource(orgId:string,connectionId:string,reposi
   const encodedPath=pathParts.map(encodeURIComponent).join('/');
   const fileResponse=await installationRequest(
     installation.installationId,
-    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?ref=${encodeURIComponent(branch)}`
+    `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?ref=${encodeURIComponent(branchData.commit.sha)}`
   );
   if(fileResponse.status===404)throw Object.assign(new Error('Deployment source file was not found on the selected branch'),{statusCode:400});
   if(!fileResponse.ok)throw Object.assign(new Error('Unable to verify deployment source file'),{statusCode:502});
