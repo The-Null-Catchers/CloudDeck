@@ -24,60 +24,8 @@ type containerSummary struct {
 }
 type composeProjectSummary struct {Name string `json:"name"`;Services []string `json:"services"`;Running int `json:"running"`;Total int `json:"total"`}
 
-var dockerID=regexp.MustCompile(`^[a-fA-F0-9]{12,64}package main
-
-import (
- "context"
- "encoding/json"
- "errors"
- "fmt"
- "io"
- "net"
- "net/http"
- "os"
- "regexp"
- "sort"
- "strings"
- "time"
-)
-
-type agentCommand struct {Type string `json:"type"`;RequestID string `json:"requestId"`;Action string `json:"action"`;Payload json.RawMessage `json:"payload"`}
-type commandResult struct {Type string `json:"type"`;RequestID string `json:"requestId"`;Success bool `json:"success"`;Data any `json:"data,omitempty"`;Error string `json:"error,omitempty"`}
-type dockerPort struct {PrivatePort int `json:"privatePort"`;PublicPort int `json:"publicPort,omitempty"`;Type string `json:"type"`}
-type containerSummary struct {
- ID string `json:"id"`;Name string `json:"name"`;Image string `json:"image"`;State string `json:"state"`;Status string `json:"status"`;Ports []dockerPort `json:"ports"`
- ComposeProject string `json:"composeProject,omitempty"`;ComposeService string `json:"composeService,omitempty"`
-}
-type composeProjectSummary struct {Name string `json:"name"`;Services []string `json:"services"`;Running int `json:"running"`;Total int `json:"total"`}
-
-)
-var composeName=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}package main
-
-import (
- "context"
- "encoding/json"
- "errors"
- "fmt"
- "io"
- "net"
- "net/http"
- "os"
- "regexp"
- "sort"
- "strings"
- "time"
-)
-
-type agentCommand struct {Type string `json:"type"`;RequestID string `json:"requestId"`;Action string `json:"action"`;Payload json.RawMessage `json:"payload"`}
-type commandResult struct {Type string `json:"type"`;RequestID string `json:"requestId"`;Success bool `json:"success"`;Data any `json:"data,omitempty"`;Error string `json:"error,omitempty"`}
-type dockerPort struct {PrivatePort int `json:"privatePort"`;PublicPort int `json:"publicPort,omitempty"`;Type string `json:"type"`}
-type containerSummary struct {
- ID string `json:"id"`;Name string `json:"name"`;Image string `json:"image"`;State string `json:"state"`;Status string `json:"status"`;Ports []dockerPort `json:"ports"`
- ComposeProject string `json:"composeProject,omitempty"`;ComposeService string `json:"composeService,omitempty"`
-}
-type composeProjectSummary struct {Name string `json:"name"`;Services []string `json:"services"`;Running int `json:"running"`;Total int `json:"total"`}
-
-)
+var dockerID=regexp.MustCompile(`^[a-fA-F0-9]{12,64}$`)
+var composeName=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
 
 func dockerClient() (*http.Client,error) {
  socket:=os.Getenv("CLOUDDECK_DOCKER_SOCKET");if socket==""{return nil,errors.New("Docker integration disabled on this agent")}
@@ -203,7 +151,6 @@ func tailContainerLogs(id string,limit int)([]string,bool,error){
  if len(lines)>limit{lines=lines[len(lines)-limit:]}
  return lines,truncated,nil
 }
-
 
 func composeServiceContainers(project,service string)([]containerSummary,error){
  if !composeName.MatchString(project)||!composeName.MatchString(service){return nil,errors.New("Invalid Compose project or service")}
