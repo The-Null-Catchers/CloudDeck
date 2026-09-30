@@ -21,6 +21,7 @@ import {applicationRoutes} from './applications.js';
 import {healthCheckRoutes} from './health-checks.js';
 import {alertRoutes} from './alerts.js';
 import {domainRoutes} from './domains.js';
+import {secretRoutes} from './secrets.js';
 import {startDomainTlsRunner} from './domain-runner.js';
 import {startHealthCheckRunner} from './health-runner.js';
 import {startDeploymentQueueReconciler,closeDeploymentQueue} from './deployment-queue.js';
@@ -31,7 +32,7 @@ import './security.js';
 import { startOfflineSweep } from './offline.js';
 
 export function buildApp() {
-  const app = Fastify({logger:{redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie','body.password','body.token','body.credential']},bodyLimit:65536,trustProxy:false});
+  const app = Fastify({logger:{redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie','body.password','body.token','body.credential','body.value']},bodyLimit:65536,trustProxy:false});
   app.register(cors,{origin:process.env.APP_ORIGIN ?? 'http://localhost:3000',credentials:true});
   app.register(cookie);
   app.register(rateLimit,{max:100,timeWindow:'1 minute'});
@@ -63,6 +64,7 @@ export function buildApp() {
   app.register(healthCheckRoutes,{prefix:'/api/v1'});
   app.register(alertRoutes,{prefix:'/api/v1'});
   app.register(domainRoutes,{prefix:'/api/v1'});
+  app.register(secretRoutes,{prefix:'/api/v1'});
   return app;
 }
 
