@@ -56,3 +56,38 @@ export async function openTerminalSession(serverId:string,onEvent:(event:Termina
   };
   return socket;
 }
+
+
+export type DeploymentLogRow={
+  id:number;
+  stage:'cloning'|'building'|'deploying'|'health-checking';
+  stream:'system'|'build'|'stdout'|'stderr';
+  line:string;
+  createdAt?:string;
+  created_at?:string;
+};
+export type DeploymentLogStreamEvent=
+  | {type:'ready';deploymentId:string;afterId:number}
+  | {type:'log';id:number;stage:DeploymentLogRow['stage'];stream:DeploymentLogRow['stream'];line:string;createdAt:string}
+  | {type:'done';state:string;afterId:number};
+
+export async function openDeploymentLogStream(
+  deploymentId:string,
+  afterId:number,
+  onEvent:(event:DeploymentLogStreamEvent)=>void
+){
+  const ticket=await api<{ticket:string;afterId:number;expiresInSeconds:number}>(
+    '/deployments/'+deploymentId+'/logs/ticket',
+    {method:'POST',body:JSON.stringify({afterId})}
+  );
+  const endpoint=new URL('/api/v1/deployment-logs/stream',base);
+  endpoint.protocol=endpoint.protocol==='https:'?'wss:':'ws:';
+  endpoint.searchParams.set('ticket',ticket.ticket);
+  endpoint.searchParams.set('afterId',String(afterId));
+  const socket=new WebSocket(endpoint.toString());
+  socket.onmessage=event=>{
+    try{onEvent(JSON.parse(event.data) as DeploymentLogStreamEvent)}
+    catch{socket.close(1007,'Invalid deployment log payload')}
+  };
+  return socket;
+}
