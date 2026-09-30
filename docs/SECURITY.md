@@ -36,3 +36,12 @@ This means central health checks cannot intentionally reach localhost, cloud met
 Operational email is asynchronous. Alert transactions store in-app notifications and durable email-delivery records, then BullMQ workers perform SMTP I/O outside the alert transaction. Queue jobs contain only a delivery identifier rather than recipient addresses or message bodies.
 
 Only users with a verified email address receive email-delivery rows. Notification links are restricted to single-slash internal paths before they are combined with `APP_ORIGIN`; protocol-relative or external destinations are ignored. Titles have CR/LF removed before being used as mail subjects. SMTP errors are bounded before persistence and retried without logging credentials, access tokens, or message secrets.
+
+
+## Domain and TLS boundary
+
+Domain hostnames are treated as untrusted network destinations. CloudDeck canonicalizes them with IDNA/ASCII conversion, rejects IP literals and malformed labels, resolves DNS before connecting, and refuses the probe when any returned address is private or reserved. The TLS probe connects to the validated public address on port 443 with the user hostname retained as SNI.
+
+Certificate metadata is bounded before storage. Expiry alerts reference the domain but domain deletion preserves alert history by nulling the foreign key; active domain alerts are resolved before detach.
+
+The agent does not receive filesystem paths, proxy snippets, or arbitrary reload commands from the API. Caddy/Nginx configuration is not written by the main agent service because it runs unprivileged with `NoNewPrivileges=true`. Future proxy automation must cross a narrow privileged-helper boundary with typed hostname/port/proxy operations and root-owned configuration templates.
