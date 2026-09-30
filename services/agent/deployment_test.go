@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+ "context"
+ "testing"
+)
 
 func ptrString(v string)*string{return &v}
 func ptrInt(v int)*int{return &v}
@@ -95,4 +98,19 @@ func TestValidateComposeRollbackPayloadRejectsBadMaps(t *testing.T){
   func(p *composeRollbackPayload){p.PreviousComposeContainerIDs=map[string]string{}},
  }
  for i,mutate:=range tests{p:=validComposeRollbackPayload();mutate(&p);if validateComposeRollbackPayload(p)==nil{t.Fatalf("case %d should fail",i)}}
+}
+
+
+func TestDeploymentExecutionCancellationIsScoped(t *testing.T){
+ deploymentID:="123e4567-e89b-12d3-a456-426614174000"
+ ctx,done,ok:=beginDeploymentExecution(context.Background(),deploymentID)
+ if !ok{t.Fatal("expected deployment execution registration")}
+ if _,_,duplicate:=beginDeploymentExecution(context.Background(),deploymentID);duplicate{t.Fatal("duplicate execution should be rejected")}
+ if !cancelDeploymentExecution(deploymentID){t.Fatal("expected registered execution to cancel")}
+ select{
+ case <-ctx.Done():
+ default:t.Fatal("deployment context should be cancelled")
+ }
+ done()
+ if cancelDeploymentExecution(deploymentID){t.Fatal("completed deployment should no longer be cancellable")}
 }
