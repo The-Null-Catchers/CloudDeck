@@ -48,6 +48,18 @@ export async function enqueueDeployment(deploymentId:string){
   await deploymentQueue().add(job.name,job.data,job.options);
 }
 
+export async function removeQueuedDeploymentJob(deploymentId:string){
+  deploymentJob.parse({deploymentId});
+  const job=await deploymentQueue().getJob(deploymentId);
+  if(!job)return {removed:false,state:'missing'};
+  const state=await job.getState();
+  if(state==='waiting'||state==='delayed'||state==='prioritized'||state==='waiting-children'){
+    await job.remove();
+    return {removed:true,state};
+  }
+  return {removed:false,state};
+}
+
 export async function reconcileQueuedDeployments(limit=100){
   const bounded=Math.max(1,Math.min(500,Math.trunc(limit)));
   const rows=await pool.query(
