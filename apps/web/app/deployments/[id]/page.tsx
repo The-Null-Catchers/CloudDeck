@@ -4,9 +4,9 @@ import {useEffect,useMemo,useState} from 'react';
 import {useParams,useRouter} from 'next/navigation';
 import {
   Activity,ArrowLeft,Boxes,CheckCircle2,Clock3,GitBranch,GitCommit,OctagonAlert,
-  RefreshCw,RotateCcw,Server,ShieldCheck,TimerReset,Workflow,XCircle
+  RefreshCw,RotateCcw,Server,ShieldCheck,TimerReset,Workflow,XCircle,ScrollText,Radio
 } from 'lucide-react';
-import {api} from '@/lib/api';
+import {api,openDeploymentLogStream,type DeploymentLogRow} from '@/lib/api';
 
 type DeploymentEvent={id:number;state:string;message:string|null;created_at:string};
 type DeploymentDetail={
@@ -35,6 +35,9 @@ export default function DeploymentDetailPage(){
   const [loading,setLoading]=useState(true);
   const [rollbackConfirm,setRollbackConfirm]=useState(false);
   const [rollingBack,setRollingBack]=useState(false);
+  const [logs,setLogs]=useState<DeploymentLogRow[]>([]);
+  const [logStatus,setLogStatus]=useState<'connecting'|'live'|'complete'|'error'>('connecting');
+  const [logFilter,setLogFilter]=useState<'all'|'build'|'runtime'|'errors'>('all');
 
   async function load(silent=false){
     if(!silent)setLoading(true);
@@ -52,6 +55,64 @@ export default function DeploymentDetailPage(){
     },4000);
     return()=>clearInterval(timer);
   },[params.id,deployment?.state]);
+
+  useEffect(()=>{
+    let active=true;
+    let socket:WebSocket|null=null;
+    let reconnect:ReturnType<typeof setTimeout>|null=null;
+    let cursor=0;
+
+    const append=(row:DeploymentLogRow)=>{
+      if(!active)return;
+      cursor=Math.max(cursor,row.id);
+      setLogs(items=>{
+        if(items.some(item=>item.id===row.id))return items;
+        const next=[...items,row];
+        return next.length>1000?next.slice(-1000):next;
+      });
+    };
+
+    const connect=async()=>{
+      if(!active)return;
+      setLogStatus('connecting');
+      try{
+        const history=await api<{logs:Array<DeploymentLogRow>;nextAfter:number}>(`/deployments/${params.id}/logs?after=0&limit=500`);
+        if(!active)return;
+        const normalized=history.logs.map(row=>({...row,createdAt:row.createdAt??row.created_at}));
+        if(cursor===0){
+          setLogs(normalized);
+          cursor=history.nextAfter;
+        }else{
+          for(const row of normalized){if(row.id>cursor)append(row)}
+        }
+        socket=await openDeploymentLogStream(params.id,cursor,event=>{
+          if(!active)return;
+          if(event.type==='ready')setLogStatus('live');
+          else if(event.type==='log')append({
+            id:event.id,
+            stage:event.stage,
+            stream:event.stream,
+            line:event.line,
+            createdAt:event.createdAt
+          });
+          else if(event.type==='done')setLogStatus('complete');
+        });
+        socket.onclose=()=>{
+          if(!active)return;
+          if(deployment&&terminalStates.has(deployment.state)){setLogStatus('complete');return}
+          setLogStatus('connecting');
+          reconnect=setTimeout(()=>void connect(),1500);
+        };
+        socket.onerror=()=>{if(active)setLogStatus('error')};
+      }catch{
+        if(!active)return;
+        setLogStatus('error');
+        reconnect=setTimeout(()=>void connect(),2500);
+      }
+    };
+    void connect();
+    return()=>{active=false;if(reconnect)clearTimeout(reconnect);socket?.close()};
+  },[params.id]);
 
   async function rollback(){
     if(!deployment)return;
@@ -78,6 +139,12 @@ export default function DeploymentDetailPage(){
   },[deployment]);
 
   const currentStageIndex=deployment?stages.indexOf(deployment.state as typeof stages[number]):-1;
+  const visibleLogs=logs.filter(row=>{
+    if(logFilter==='all')return true;
+    if(logFilter==='build')return row.stream==='build';
+    if(logFilter==='runtime')return row.stream==='stdout'||row.stream==='stderr'||row.stream==='system';
+    return row.stream==='stderr';
+  });
 
   return <div className="deploy-detail-page">
     <header className="deploy-topbar">
@@ -158,6 +225,26 @@ export default function DeploymentDetailPage(){
             {!Object.keys(deployment.compose_container_ids??{}).length&&<div className="deployment-empty">Service results appear after activation.</div>}
           </div>
         </section>}
+
+        <section className="deployment-log-card">
+          <div className="deploy-section-head">
+            <div><h2><ScrollText size={17}/> Live logs</h2><p>Durable build and runtime output · latest 1,000 lines in this view.</p></div>
+            <span className={`deployment-log-status ${logStatus}`}><Radio size={11}/>{logStatus}</span>
+          </div>
+          <div className="deployment-log-toolbar">
+            {(['all','build','runtime','errors'] as const).map(filter=><button key={filter} className={logFilter===filter?'active':''} onClick={()=>setLogFilter(filter)}>{filter}</button>)}
+            <span>{visibleLogs.length} lines</span>
+          </div>
+          <div className="deployment-log-console" role="log" aria-live="polite">
+            {visibleLogs.map(row=><div className={`deployment-log-line ${row.stream}`} key={row.id}>
+              <time>{row.createdAt?new Date(row.createdAt).toLocaleTimeString():'--:--:--'}</time>
+              <span className="log-stage">{row.stage}</span>
+              <span className="log-stream">{row.stream}</span>
+              <code>{row.line}</code>
+            </div>)}
+            {!visibleLogs.length&&<div className="deployment-log-empty">{logStatus==='connecting'?'Connecting to deployment logs…':'No log lines match this filter.'}</div>}
+          </div>
+        </section>
 
         <section className="deploy-timeline-card">
           <div className="deploy-section-head"><div><h2>Timeline</h2><p>Append-only deployment events.</p></div><span>{deployment.events.length} events</span></div>
