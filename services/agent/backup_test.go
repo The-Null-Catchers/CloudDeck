@@ -64,3 +64,13 @@ func TestDirectoryBackupRejectsSymlinks(t *testing.T){
  })
  if err==nil{t.Fatal("expected symlink backup to be rejected")}
 }
+
+func TestDeleteLocalBackupAcceptsOnlyStorageKey(t *testing.T){
+ target:=t.TempDir()
+ t.Setenv("CLOUDDECK_BACKUP_DIR",target)
+ good:="44444444-4444-4444-8444-444444444444.tar.gz"
+ if err:=os.WriteFile(filepath.Join(target,good),[]byte("archive"),0600);err!=nil{t.Fatal(err)}
+ if err:=deleteLocalBackup(good);err!=nil{t.Fatal(err)}
+ if _,err:=os.Stat(filepath.Join(target,good));!os.IsNotExist(err){t.Fatalf("archive still exists or unexpected error: %v",err)}
+ if err:=deleteLocalBackup("../etc/passwd");err==nil{t.Fatal("expected traversal-shaped key to be rejected")}
+}
