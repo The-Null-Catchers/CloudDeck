@@ -104,8 +104,9 @@ func resolveDockerVolume(name string)(string,error){
  return resolved,nil
 }
 
-func addDirectoryToArchive(ctx context.Context,source string,tw *tar.Writer)(int,error){
+func addDirectoryToArchive(ctx context.Context,source string,tw *tar.Writer,maxBytes int64)(int,error){
  entries:=0
+ var sourceBytes int64
  base:=filepath.Base(source)
  err:=filepath.WalkDir(source,func(path string,entry os.DirEntry,walkErr error)error{
   if walkErr!=nil{return walkErr}
@@ -127,6 +128,8 @@ func addDirectoryToArchive(ctx context.Context,source string,tw *tar.Writer)(int
   entries++
   if entries>1_000_000{return errors.New("backup contains too many entries")}
   if info.Mode().IsRegular(){
+   if info.Size()<0||sourceBytes+info.Size()>maxBytes{return errors.New("backup source exceeds configured size limit")}
+   sourceBytes+=info.Size()
    file,err:=os.Open(path)
    if err!=nil{return err}
    _,copyErr:=io.Copy(tw,file)
@@ -187,10 +190,11 @@ func executeLocalBackup(ctx context.Context,payload backupExecutePayload)(backup
  ok:=false
  defer func(){_ = file.Close();if !ok{_ = os.Remove(path)}}()
  hash:=sha256.New()
- limited:=&countingWriter{writer:io.MultiWriter(file,hash),limit:backupMaxBytes()}
+ maxBytes:=backupMaxBytes()
+ limited:=&countingWriter{writer:io.MultiWriter(file,hash),limit:maxBytes}
  gz:=gzip.NewWriter(limited)
  tw:=tar.NewWriter(gz)
- _,err=addDirectoryToArchive(ctx,source,tw)
+ _,err=addDirectoryToArchive(ctx,source,tw,maxBytes)
  if closeErr:=tw.Close();err==nil{err=closeErr}
  if closeErr:=gz.Close();err==nil{err=closeErr}
  if syncErr:=file.Sync();err==nil{err=syncErr}
