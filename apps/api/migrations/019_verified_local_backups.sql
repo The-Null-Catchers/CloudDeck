@@ -1,3 +1,10 @@
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM backup_jobs) OR EXISTS (SELECT 1 FROM backups) THEN
+    RAISE EXCEPTION 'Cannot migrate legacy placeholder backup rows: safe source/target semantics were not recorded';
+  END IF;
+END $$;
+
 ALTER TABLE backup_jobs
   ADD COLUMN name text,
   ADD COLUMN source text,
@@ -6,12 +13,6 @@ ALTER TABLE backup_jobs
   ADD COLUMN created_by uuid REFERENCES users(id) ON DELETE SET NULL,
   ADD COLUMN created_at timestamptz NOT NULL DEFAULT now(),
   ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now();
-
-UPDATE backup_jobs
-SET name=COALESCE(name,'Backup '||left(id::text,8)),
-    source=COALESCE(source,'/')
-WHERE name IS NULL OR source IS NULL;
-
 ALTER TABLE backup_jobs
   ALTER COLUMN name SET NOT NULL,
   ALTER COLUMN source SET NOT NULL,
