@@ -47,7 +47,7 @@ export async function persistDomainTlsResult(domain:DueDomain,result:DomainTlsPr
       [domain.id,result.status,result.certificateExpiresAt,result.certificateIssuer,result.error]
     );
     const days=certificateDaysRemaining(result.certificateExpiresAt);
-    const shouldAlert=result.status==='valid'&&days!==null&&days<=warningDays();
+    const shouldAlert=days!==null&&days<=warningDays();
     if(shouldAlert){
       const opened=await db.query(
         `INSERT INTO alerts(organization_id,server_id,domain_id,kind,state)
