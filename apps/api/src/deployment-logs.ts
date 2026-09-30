@@ -12,7 +12,7 @@ const historyQuery=z.object({
 const ticketBody=z.object({
   afterId:z.number().int().nonnegative().default(0)
 }).strict();
-const streamQuery=z.object({ticket:z.string().min(20)}).strict();
+const streamQuery=z.object({ticket:z.string().min(20),afterId:z.coerce.number().int().nonnegative().default(0)}).strict();
 const terminalStates=new Set(['successful','failed','rolled-back']);
 
 async function deploymentAccess(deploymentId:string,userId:string){
@@ -75,7 +75,7 @@ export async function deploymentLogRoutes(app:FastifyInstance){
     if(!parsed.success){socket.close(1008,'Invalid ticket');return;}
     const tokenHash=digest(parsed.data.ticket);
     let closed=false;
-    let cursor=0;
+    let cursor=parsed.success?parsed.data.afterId:0;
     let timer:ReturnType<typeof setTimeout>|null=null;
     const finish=(code=1000,reason='Deployment log stream closed')=>{
       if(closed)return;
@@ -97,8 +97,6 @@ export async function deploymentLogRoutes(app:FastifyInstance){
       if(!consumed.rowCount){finish(1008,'Expired ticket');return;}
       const deploymentId=consumed.rows[0].deployment_id as string;
       const userId=consumed.rows[0].user_id as string;
-      const initial=z.coerce.number().int().nonnegative().safeParse((request.query as {afterId?:unknown}).afterId);
-      if(initial.success)cursor=initial.data;
       const access=await pool.query(
         `SELECT d.state,a.organization_id
          FROM deployments d
