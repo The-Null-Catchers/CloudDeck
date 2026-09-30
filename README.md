@@ -15,6 +15,8 @@ CloudDeck is a multi-server operations and observability platform that combines 
 - Bounded systemd journal snapshots plus realtime Docker/systemd log subscriptions using one-time WebSocket tickets, cancellation, and capped in-memory UI buffers.
 - Docker Compose local stack and GitHub Actions checks for Node and Go.
 - Deployment lifecycle state machine with guarded transitions, event history, lifecycle timestamps, RBAC-protected read APIs, and rollback-state support.
+- Domain inventory and distributed TLS certificate monitoring with expiry alerts and SSRF-safe public probing.
+- Encrypted workspace secret storage using AES-256-GCM, metadata/value separation, no plaintext read API, audited rotation/deletion, and admin/owner management.
 
 ## Architecture
 
@@ -41,6 +43,8 @@ npm run migrate
 npm run dev
 npm run dev:web
 ```
+
+Generate a local development master key once with `openssl rand -base64 32` and place it in `CLOUDDECK_MASTER_KEY`. Production deployments should inject it through the platform secret manager rather than committing it.
 
 Before opening a PR run:
 
@@ -76,7 +80,7 @@ See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [arc
 4. Browser terminal — dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, a 30-minute limit, and xterm.js server-detail UI with automatic fitting/resize.
 5. Deployments — guarded state machine/read APIs, verified GitHub App linking, installation-scoped repository/branch discovery, and validated Application source configuration implemented; next: BullMQ execution, health activation, and rollback orchestration.
 6. Health checks, alert rules and email/in-app notifications.
-7. Caddy/Nginx domains, encrypted secrets, verified backups and restore.
+7. Domains/TLS monitoring and encrypted secret storage are functional; constrained proxy automation plus verified backups/restore remain.
 8. Flutter monitoring and emergency-operation mobile app.
 
 No UI or API response claims a pending feature was performed.
