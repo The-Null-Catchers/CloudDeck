@@ -14,7 +14,7 @@ import {
   type DeploymentProgressStage
 } from './commands.js';
 import {canTransitionDeployment,transitionDeployment,type DeploymentState} from './deployments.js';
-import {acquireDeploymentLease,releaseDeploymentLease,startDeploymentLeaseHeartbeat} from './deployment-leases.js';
+import {acquireDeploymentLease,releaseDeploymentLease,renewDeploymentLease,startDeploymentLeaseHeartbeat} from './deployment-leases.js';
 
 const dockerWorkerResult=z.object({
   containerId:z.string().regex(/^[a-f0-9]{12,64}$/i),
@@ -175,6 +175,11 @@ export async function processDeploymentJob(deploymentId:string){
     );
     await progressChain;
     await logChain;
+    if(leaseLost){
+      const recovered=await renewDeploymentLease(snapshot.application_id,deploymentId,leaseToken).catch(()=>false);
+      if(!recovered)throw new Error('Deployment execution lease lost');
+      leaseLost=false;
+    }
     let successMessage:string;
     let publicResult:object;
     if(snapshot.deployment_type==='compose'){
