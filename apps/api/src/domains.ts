@@ -1,6 +1,6 @@
 import type {FastifyInstance} from 'fastify';
 import {z} from 'zod';
-import {pool} from './db.js';
+import {pool,transaction} from './db.js';
 import {authenticate,membership,audit} from './security.js';
 import {normalizeDomainHostname} from './domain-tls.js';
 import {executeDomainTlsCheck} from './domain-runner.js';
@@ -177,8 +177,16 @@ export async function domainRoutes(app:FastifyInstance){
     if(!current.rowCount)throw Object.assign(new Error('Domain not found'),{statusCode:404});
     const row=current.rows[0];
     await membership(userId,row.organization_id,'domain.manage');
-    await pool.query('DELETE FROM domains WHERE id=$1',[domainId]);
-    await audit(row.organization_id,userId,'domain.delete','domain',domainId,request.ip,{hostname:row.hostname,proxyType:row.proxy_type});
+    await transaction(async db=>{
+      await db.query(
+        `UPDATE alerts
+         SET state='resolved',resolved_at=COALESCE(resolved_at,now())
+         WHERE domain_id=$1 AND state IN ('open','acknowledged')`,
+        [domainId]
+      );
+      await db.query('DELETE FROM domains WHERE id=$1',[domainId]);
+      await audit(row.organization_id,userId,'domain.delete','domain',domainId,request.ip,{hostname:row.hostname,proxyType:row.proxy_type},db);
+    });
     return {ok:true};
   });
 }
