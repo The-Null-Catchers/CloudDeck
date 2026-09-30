@@ -74,3 +74,47 @@ func TestDeleteLocalBackupAcceptsOnlyStorageKey(t *testing.T){
  if _,err:=os.Stat(filepath.Join(target,good));!os.IsNotExist(err){t.Fatalf("archive still exists or unexpected error: %v",err)}
  if err:=deleteLocalBackup("../etc/passwd");err==nil{t.Fatal("expected traversal-shaped key to be rejected")}
 }
+
+func TestPostgresBackupUsesEnvironmentPasswordAndVerifiesDump(t *testing.T){
+ target:=t.TempDir()
+ tools:=t.TempDir()
+ pgDump:=filepath.Join(tools,"pg_dump")
+ pgRestore:=filepath.Join(tools,"pg_restore")
+ dumpScript:="#!/bin/sh\ncase \"$*\" in *super-secret*) exit 41;; esac\n[ \"$PGPASSWORD\" = \"super-secret\" ] || exit 42\nprintf 'PGDMP-fake-content'\n"
+ restoreScript:="#!/bin/sh\n[ \"$1\" = \"--list\" ] || exit 43\n[ -s \"$2\" ] || exit 44\nexit 0\n"
+ if err:=os.WriteFile(pgDump,[]byte(dumpScript),0700);err!=nil{t.Fatal(err)}
+ if err:=os.WriteFile(pgRestore,[]byte(restoreScript),0700);err!=nil{t.Fatal(err)}
+ t.Setenv("CLOUDDECK_BACKUP_DIR",target)
+ t.Setenv("CLOUDDECK_PG_DUMP_BIN",pgDump)
+ t.Setenv("CLOUDDECK_PG_RESTORE_BIN",pgRestore)
+ t.Setenv("CLOUDDECK_BACKUP_MAX_BYTES","10485760")
+
+ result,err:=executeLocalBackup(context.Background(),backupExecutePayload{
+  BackupID:"55555555-5555-4555-8555-555555555555",
+  Kind:"postgres",
+  Source:"appdb",
+  TargetType:"local",
+  Database:&databaseBackupConfig{
+   Host:"db.internal",Port:5432,Username:"backup",Password:"super-secret",SSLMode:"require",
+  },
+ })
+ if err!=nil{t.Fatal(err)}
+ if !result.Verified{t.Fatal("database backup must be verified")}
+ if result.EntryCount<2{t.Fatalf("expected staged directory and dump file, got %d entries",result.EntryCount)}
+}
+
+func TestDatabaseBackupValidationRejectsUnsafeConnectionFields(t *testing.T){
+ cases:=[]databaseBackupConfig{
+  {Host:"db.internal;touch /tmp/pwn",Port:5432,Username:"backup",Password:"secret",SSLMode:"require"},
+  {Host:"db.internal",Port:0,Username:"backup",Password:"secret",SSLMode:"require"},
+  {Host:"db.internal",Port:5432,Username:"bad user",Password:"secret",SSLMode:"require"},
+  {Host:"db.internal",Port:5432,Username:"backup",Password:"secret",SSLMode:"invalid"},
+ }
+ for _,config:=range cases{
+  current:=config
+  if err:=validateDatabaseBackupConfig("postgres","appdb",&current);err==nil{t.Fatalf("expected invalid database config to be rejected: %+v",config)}
+ }
+ if err:=validateDatabaseBackupConfig("postgres","app db",&databaseBackupConfig{Host:"db.internal",Port:5432,Username:"backup",Password:"secret",SSLMode:"require"});err==nil{
+  t.Fatal("expected unsafe database name to be rejected")
+ }
+}
