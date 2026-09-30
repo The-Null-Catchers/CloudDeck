@@ -23,7 +23,9 @@ export const allowedActions = [
   'deployment.execute',
   'deployment.rollback',
   'deployment.rollbackCompose',
-  'deployment.cancel'
+  'deployment.cancel',
+  'backup.execute',
+  'backup.deleteLocal'
 ] as const;
 export type AgentAction = typeof allowedActions[number];
 export interface ApiError { error: { code: string; message: string } }

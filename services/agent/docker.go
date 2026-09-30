@@ -211,6 +211,9 @@ func executeCommand(command agentCommand)commandResult{
   var payload struct{ContainerID string `json:"containerId"`};if err:=decodeStrict(command.Payload,&payload);err!=nil||!dockerID.MatchString(payload.ContainerID){result.Error="Invalid container ID";return result}
   action:=strings.TrimPrefix(command.Action,"docker.");action=strings.TrimSuffix(action,"Container")
   if err:=containerAction(payload.ContainerID,action);err!=nil{result.Error=err.Error();return result};result.Data=map[string]bool{"ok":true}
+ case "backup.deleteLocal":
+  var payload struct{StorageKey string `json:"storageKey"`};if err:=decodeStrict(command.Payload,&payload);err!=nil||!backupStorageKey.MatchString(payload.StorageKey){result.Error="Invalid backup storage key";return result}
+  if err:=deleteLocalBackup(payload.StorageKey);err!=nil{result.Error=err.Error();return result};result.Data=map[string]bool{"ok":true}
  case "systemd.listServices":
   if len(command.Payload)>0&&string(command.Payload)!="{}"{result.Error="Unexpected payload";return result};data,err:=listSystemdServices();if err!=nil{result.Error=err.Error();return result};result.Data=data
  case "systemd.startService","systemd.stopService","systemd.restartService":

@@ -22,6 +22,7 @@ import {healthCheckRoutes} from './health-checks.js';
 import {alertRoutes} from './alerts.js';
 import {domainRoutes} from './domains.js';
 import {secretRoutes} from './secrets.js';
+import {backupRoutes} from './backups.js';
 import {startDomainTlsRunner} from './domain-runner.js';
 import {startHealthCheckRunner} from './health-runner.js';
 import {startDeploymentQueueReconciler,closeDeploymentQueue} from './deployment-queue.js';
@@ -65,6 +66,7 @@ export function buildApp() {
   app.register(alertRoutes,{prefix:'/api/v1'});
   app.register(domainRoutes,{prefix:'/api/v1'});
   app.register(secretRoutes,{prefix:'/api/v1'});
+  app.register(backupRoutes,{prefix:'/api/v1'});
   return app;
 }
 

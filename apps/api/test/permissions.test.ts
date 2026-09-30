@@ -12,6 +12,8 @@ test('viewers cannot operate servers or manage members', () => {
   assert.equal(can('viewer','domain.manage'),false);
   assert.equal(can('viewer','secret.read'),true);
   assert.equal(can('viewer','secret.manage'),false);
+  assert.equal(can('viewer','backup.read'),true);
+  assert.equal(can('viewer','backup.manage'),false);
 });
 test('operators can act but cannot add servers', () => {
   assert.equal(can('operator','server.action'),true);
@@ -24,4 +26,7 @@ test('operators can act but cannot add servers', () => {
   assert.equal(can('operator','secret.read'),true);
   assert.equal(can('operator','secret.manage'),false);
   assert.equal(can('admin','secret.manage'),true);
+  assert.equal(can('operator','backup.read'),true);
+  assert.equal(can('operator','backup.manage'),false);
+  assert.equal(can('admin','backup.manage'),true);
 });
