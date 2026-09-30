@@ -7,7 +7,7 @@ END $$;
 
 ALTER TABLE secrets
   DROP CONSTRAINT IF EXISTS secrets_organization_id_fkey,
-  DROP CONSTRAINT IF EXISTS secrets_name_key,
+  DROP CONSTRAINT IF EXISTS secrets_organization_id_name_key,
   DROP COLUMN ciphertext,
   DROP COLUMN nonce,
   DROP COLUMN key_version,
