@@ -145,16 +145,20 @@ export async function backupRoutes(app:FastifyInstance){
         },db);
         return updated.rows[0];
       });
-      await pool.query(
-        `DELETE FROM backups
-         WHERE id IN (
-           SELECT id FROM backups
-           WHERE job_id=$1 AND status='successful'
-           ORDER BY created_at DESC
-           OFFSET $2
-         )`,
+      const stale=await pool.query(
+        `SELECT id,storage_key
+         FROM backups
+         WHERE job_id=$1 AND status='successful' AND storage_key IS NOT NULL
+         ORDER BY created_at DESC
+         OFFSET $2`,
         [jobId,job.retention_count]
       );
+      for(const row of stale.rows as Array<{id:string;storage_key:string}>){
+        try{
+          await sendAgentCommand(job.server_id,'backup.deleteLocal',{storageKey:row.storage_key});
+          await pool.query('DELETE FROM backups WHERE id=$1',[row.id]);
+        }catch{}
+      }
       reply.code(201);
       return completed;
     }catch(error){
@@ -177,9 +181,16 @@ export async function backupRoutes(app:FastifyInstance){
     void body;
     const job=await backupJob(jobId);
     await membership(userId,job.organization_id,'backup.manage');
+    const stored=await pool.query(
+      `SELECT id,storage_key FROM backups WHERE job_id=$1 AND storage_key IS NOT NULL ORDER BY created_at ASC`,
+      [jobId]
+    );
+    for(const row of stored.rows as Array<{id:string;storage_key:string}>){
+      await sendAgentCommand(job.server_id,'backup.deleteLocal',{storageKey:row.storage_key});
+    }
     await transaction(async db=>{
       await db.query('DELETE FROM backup_jobs WHERE id=$1',[jobId]);
-      await audit(job.organization_id,userId,'backup.job.delete','backup_job',jobId,request.ip,{name:job.name,kind:job.kind},db);
+      await audit(job.organization_id,userId,'backup.job.delete','backup_job',jobId,request.ip,{name:job.name,kind:job.kind,archivesRemoved:stored.rowCount},db);
     });
     return {ok:true};
   });
