@@ -3,7 +3,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {
-  Activity,ArrowLeft,CheckCircle2,DatabaseBackup,HardDrive,History,Play,Plus,RefreshCw,Server,ShieldCheck,Trash2,TriangleAlert
+  Activity,ArrowLeft,CheckCircle2,DatabaseBackup,HardDrive,History,Play,Plus,RefreshCw,ShieldCheck,Trash2,TriangleAlert
 } from 'lucide-react';
 import {api} from '@/lib/api';
 
