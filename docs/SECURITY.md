@@ -10,7 +10,7 @@ RBAC: viewers can read inventory, metrics and logs; operators can perform approv
 
 Realtime Docker/systemd log streams use one-time tickets and are forwarded in memory without log persistence. Browser terminal sessions also use one-time tickets, a dedicated `terminal.access` permission, PTYs, a 30-minute hard timeout, and start/stop audit records. Terminal contents are not stored.
 
-Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, encrypted secret key management, backup/restore verification workflow, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
+Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, backup/restore verification workflow, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
 
 
 ## Health-check SSRF boundary
@@ -45,3 +45,10 @@ Domain hostnames are treated as untrusted network destinations. CloudDeck canoni
 Certificate metadata is bounded before storage. Expiry alerts reference the domain but domain deletion preserves alert history by nulling the foreign key; active domain alerts are resolved before detach.
 
 The agent does not receive filesystem paths, proxy snippets, or arbitrary reload commands from the API. Caddy/Nginx configuration is not written by the main agent service because it runs unprivileged with `NoNewPrivileges=true`. Future proxy automation must cross a narrow privileged-helper boundary with typed hostname/port/proxy operations and root-owned configuration templates.
+
+
+## Encrypted secrets boundary
+
+Workspace secret values are encrypted before persistence with AES-256-GCM and a fresh random IV for every write. Ciphertext, IV, authentication tag, and key version are stored separately from secret metadata. Plaintext is never included in API responses, audit metadata, or application logs, and Fastify redaction includes request `body.value`.
+
+Only admins and owners can create, rotate, rename, or delete secrets; operators and viewers can inspect metadata but cannot retrieve values. Deletes require an explicit confirmation body and all writes are audited without recording secret contents. `CLOUDDECK_MASTER_KEY` must decode to exactly 32 bytes and must be injected from deployment secret storage. Production hardening still requires external KMS/Vault-backed key wrapping, version rotation, and key recovery procedures.
