@@ -25,3 +25,14 @@ In-app notifications are inserted in the same PostgreSQL transaction that opens 
 The queue payload contains only the delivery ID; email addresses, titles, bodies, and links remain in PostgreSQL. Workers claim a pending row before delivery, persist attempt state, and mark terminal failures after the configured BullMQ attempts are exhausted. Stale `sending` rows are returned to `pending` after a lease-style timeout so worker crashes do not permanently strand mail.
 
 Operational email links accept only internal CloudDeck paths and are expanded against `APP_ORIGIN`. SMTP failures do not roll back health results or alert creation. The delivery model is intentionally channel-oriented so webhook, Slack, and Telegram adapters can be added later without changing alert generation.
+
+
+## Domains and TLS monitoring
+
+Domains are attached to applications and record the intended reverse-proxy type plus a validated loopback target port. The API normalizes hostnames to ASCII DNS form and stores certificate status separately from proxy configuration state.
+
+A distributed TLS runner claims due domains with PostgreSQL `FOR UPDATE SKIP LOCKED`, advances `next_tls_check_at` before network I/O, and checks each public hostname on port 443 every six hours. DNS answers are rejected if any address is private, loopback, link-local, carrier-grade NAT, multicast, documentation, benchmark, or otherwise reserved. The TLS socket connects to the validated address while retaining the original hostname for SNI and certificate verification context.
+
+Certificate expiry warnings use the normal alert and notification pipeline. The default warning window is 14 days and can be bounded with `SSL_EXPIRY_WARNING_DAYS`. Expiry alerts are de-duplicated per domain and resolve automatically after a later valid certificate has more than the warning window remaining.
+
+Reverse-proxy mutation is intentionally not performed by the unprivileged agent in this stage. The production agent runs with `NoNewPrivileges=true` and a strict writable-path sandbox; Caddy/Nginx automation will use a separate constrained privileged helper instead of weakening that sandbox.
