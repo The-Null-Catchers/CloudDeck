@@ -3,7 +3,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {
-  Activity,ArrowLeft,ArrowUpRight,Boxes,GitBranch,GitCommit,RefreshCw,Rocket,
+  Activity,ArrowLeft,ArrowUpRight,Boxes,GitBranch,GitCommit,RefreshCw,Rocket,Plus,
   RotateCcw,Search,Server,ToggleLeft,ToggleRight,Workflow
 } from 'lucide-react';
 import {api} from '@/lib/api';
@@ -109,7 +109,7 @@ export default function DeploymentsPage(){
           <h1>Ship with confidence</h1>
           <p>Deploy pinned GitHub commits, watch every stage, and roll back safely.</p>
         </div>
-        <button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button>
+        <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button><button className="primary" onClick={()=>router.push('/applications/new')}><Plus size={15}/> New application</button></div>
       </section>
 
       {error&&<div className="notice" role="status">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
@@ -146,7 +146,7 @@ export default function DeploymentsPage(){
               </button>
             </div>
           </article>)}
-          {!applications.length&&!loading&&<div className="empty">No applications configured yet.</div>}
+          {!applications.length&&!loading&&<div className="empty application-empty">No applications configured yet.<button className="primary" onClick={()=>router.push('/applications/new')}><Plus size={15}/> Create application</button></div>}
         </div>
       </section>
 
