@@ -68,10 +68,6 @@ export async function serverRoutes(app: FastifyInstance) {
     const result = await pool.query(`SELECT bucket_at,cpu_percent,memory_percent,disk_percent,load_1,network_rx_bytes,network_tx_bytes FROM server_metrics WHERE server_id=$1 AND bucket_at > now()-$2::interval ORDER BY bucket_at ASC LIMIT 43200`,[serverId,ranges[range]]);
     return {points:result.rows};
   });
-  app.get('/organizations/:orgId/alerts', async request => {
-    const {userId}=await authenticate(request);const {orgId}=z.object({orgId:id}).parse(request.params);await membership(userId,orgId,'server.read');
-    const result=await pool.query('SELECT id,server_id,kind,state,created_at FROM alerts WHERE organization_id=$1 ORDER BY created_at DESC LIMIT 100',[orgId]);return {alerts:result.rows};
-  });
   app.get('/notifications', async request => {
     const {userId}=await authenticate(request);const result=await pool.query('SELECT id,type,title,read_at,created_at,alert_id FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100',[userId]);return {notifications:result.rows};
   });

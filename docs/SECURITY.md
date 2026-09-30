@@ -11,3 +11,21 @@ RBAC: viewers can read inventory, metrics and logs; operators can perform approv
 Realtime Docker/systemd log streams use one-time tickets and are forwarded in memory without log persistence. Browser terminal sessions also use one-time tickets, a dedicated `terminal.access` permission, PTYs, a 30-minute hard timeout, and start/stop audit records. Terminal contents are not stored.
 
 Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, comprehensive alert delivery, encrypted secret key management, backup/restore verification workflow, deployments, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
+
+
+## Health-check SSRF boundary
+
+Health checks are user-configurable network requests, so the API treats every target as untrusted.
+
+The central probe runner:
+
+- accepts only `http://`, `https://`, or explicit `host:port` TCP targets matching the selected check kind;
+- rejects credentials and URL fragments;
+- resolves DNS itself before connecting;
+- rejects a hostname if any resolved address is loopback, private, link-local, carrier-grade NAT, multicast, documentation, benchmark, or otherwise reserved;
+- connects to the validated resolved address rather than resolving the hostname again in the HTTP/TCP client, reducing DNS-rebinding exposure;
+- keeps the original Host header and HTTPS SNI hostname for normal virtual hosting and certificate validation;
+- does not automatically follow redirects;
+- bounds timeout, interval, target length, and stored error length.
+
+This means central health checks cannot intentionally reach localhost, cloud metadata endpoints such as link-local addresses, or RFC1918/ULA networks. Private infrastructure monitoring should be performed through a future typed Agent health-check action.
