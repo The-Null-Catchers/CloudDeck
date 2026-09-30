@@ -4,20 +4,21 @@ import {z} from 'zod';
 import {pool,transaction} from './db.js';
 import {authenticate,membership,audit} from './security.js';
 import {verifyGitHubSource} from './github.js';
-import {enqueueDeployment} from './deployment-queue.js';
+import {enqueueDeployment,removeQueuedDeploymentJob} from './deployment-queue.js';
 import {sendAgentCommand} from './commands.js';
 
-export const deploymentStates=['queued','cloning','building','deploying','health-checking','successful','failed','rolled-back'] as const;
+export const deploymentStates=['queued','cloning','building','deploying','health-checking','successful','failed','cancelled','rolled-back'] as const;
 export type DeploymentState=typeof deploymentStates[number];
 
 const transitions:Record<DeploymentState,ReadonlySet<DeploymentState>>={
-  queued:new Set(['cloning','failed']),
-  cloning:new Set(['building','failed']),
-  building:new Set(['deploying','failed']),
-  deploying:new Set(['health-checking','failed']),
-  'health-checking':new Set(['successful','failed']),
+  queued:new Set(['cloning','failed','cancelled']),
+  cloning:new Set(['building','failed','cancelled']),
+  building:new Set(['deploying','failed','cancelled']),
+  deploying:new Set(['health-checking','failed','cancelled']),
+  'health-checking':new Set(['successful','failed','cancelled']),
   successful:new Set(['rolled-back']),
   failed:new Set(),
+  cancelled:new Set(),
   'rolled-back':new Set()
 };
 
@@ -45,7 +46,7 @@ export async function transitionDeployment(
     if(!canTransitionDeployment(from,next)){
       throw Object.assign(new Error(`Invalid deployment transition: ${from} -> ${next}`),{statusCode:409});
     }
-    const terminal=next==='successful'||next==='failed'||next==='rolled-back';
+    const terminal=next==='successful'||next==='failed'||next==='cancelled'||next==='rolled-back';
     const started=from==='queued'&&next==='cloning';
     const updated=await db.query(
       `UPDATE deployments
@@ -71,6 +72,7 @@ const uuid=z.uuid();
 const listQuery=z.object({limit:z.coerce.number().int().min(1).max(100).default(50)}).strict();
 const idempotencyKey=z.string().trim().min(8).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const rollbackBody=z.object({confirm:z.literal(true)}).strict();
+const cancelBody=z.object({confirm:z.literal(true)}).strict();
 const rollbackResult=z.object({
   containerId:z.string().regex(/^[a-f0-9]{12,64}$/i),
   rolledBackContainerId:z.string().regex(/^[a-f0-9]{12,64}$/i)
@@ -83,6 +85,7 @@ const composeRollbackResult=z.object({
   composeContainerIds:composeContainerMap,
   rolledBackComposeContainerIds:composeContainerMap
 }).strict();
+const cancelResult=z.object({cancelled:z.boolean()}).strict();
 
 export function parseDeploymentIdempotencyKey(value:unknown){
   return idempotencyKey.parse(value);
@@ -195,6 +198,66 @@ export async function deploymentRoutes(app:FastifyInstance){
     }
     if(created.created)reply.code(201);
     return {...created.deployment,dispatch};
+  });
+
+  app.post('/deployments/:deploymentId/cancel',async (request,reply)=>{
+    const {userId}=await authenticate(request);
+    const {deploymentId}=z.object({deploymentId:uuid}).parse(request.params);
+    cancelBody.parse(request.body);
+    const deployment=await pool.query(
+      `SELECT d.id,d.state,d.cancel_requested_at,a.organization_id,a.server_id
+       FROM deployments d
+       JOIN applications a ON a.id=d.application_id
+       WHERE d.id=$1`,
+      [deploymentId]
+    );
+    if(!deployment.rowCount)throw Object.assign(new Error('Deployment not found'),{statusCode:404});
+    const row=deployment.rows[0];
+    await membership(userId,row.organization_id,'deployment.manage');
+    if(['successful','failed','cancelled','rolled-back'].includes(row.state)){
+      throw Object.assign(new Error('Only an active or queued deployment can be cancelled'),{statusCode:409});
+    }
+
+    await pool.query(
+      `UPDATE deployments
+       SET cancel_requested_at=COALESCE(cancel_requested_at,now()),cancelled_by=$2
+       WHERE id=$1`,
+      [deploymentId,userId]
+    );
+    await audit(row.organization_id,userId,'deployment.cancel.requested','deployment',deploymentId,request.ip,{state:row.state});
+
+    if(row.state==='queued'){
+      try{await removeQueuedDeploymentJob(deploymentId);}catch{void 0;}
+      const latest=await pool.query('SELECT state FROM deployments WHERE id=$1',[deploymentId]);
+      if(latest.rows[0]?.state==='queued'){
+        const cancelled=await transaction(async db=>{
+          const transitioned=await transitionDeployment(deploymentId,'cancelled',{message:'Deployment cancelled before execution'},db);
+          await audit(row.organization_id,userId,'deployment.cancel.completed','deployment',deploymentId,request.ip,{beforeExecution:true},db);
+          return transitioned;
+        });
+        return {...cancelled,cancelRequested:true};
+      }
+    }
+
+    const current=await pool.query('SELECT state FROM deployments WHERE id=$1',[deploymentId]);
+    if(['successful','failed','cancelled','rolled-back'].includes(current.rows[0]?.state)){
+      return {id:deploymentId,state:current.rows[0].state,cancelRequested:false};
+    }
+
+    let agentAcknowledged=false;
+    if(row.server_id){
+      try{
+        const result=cancelResult.parse(await sendAgentCommand(
+          row.server_id,
+          'deployment.cancel',
+          {deploymentId},
+          15_000
+        ));
+        agentAcknowledged=result.cancelled;
+      }catch{void 0;}
+    }
+    reply.code(202);
+    return {id:deploymentId,state:'cancellation-requested',cancelRequested:true,agentAcknowledged};
   });
 
   app.post('/deployments/:deploymentId/rollback',async request=>{
@@ -322,7 +385,7 @@ export async function deploymentRoutes(app:FastifyInstance){
     const {limit}=listQuery.parse(request.query);
     await membership(userId,orgId,'deployment.read');
     const rows=await pool.query(
-      `SELECT d.id,d.application_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id,
+      `SELECT d.id,d.application_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.cancel_requested_at,d.cancelled_by,d.rollback_of_deployment_id,
               d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project,d.image_ref,d.container_id,d.previous_container_id,d.compose_container_ids,d.previous_compose_container_ids
        FROM deployments d
        JOIN applications a ON a.id=d.application_id
@@ -338,7 +401,7 @@ export async function deploymentRoutes(app:FastifyInstance){
     const {userId}=await authenticate(request);
     const {deploymentId}=z.object({deploymentId:uuid}).parse(request.params);
     const deployment=await pool.query(
-      `SELECT d.id,d.application_id,a.organization_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.rollback_of_deployment_id,
+      `SELECT d.id,d.application_id,a.organization_id,a.name AS application_name,d.commit_sha,d.branch,d.state,d.created_at,d.started_at,d.finished_at,d.failure_code,d.cancel_requested_at,d.cancelled_by,d.rollback_of_deployment_id,
               d.requested_by,d.repository_full_name,d.deployment_type,d.source_path,d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project,d.image_ref,d.container_id,d.previous_container_id,d.compose_container_ids,d.previous_compose_container_ids
        FROM deployments d
        JOIN applications a ON a.id=d.application_id

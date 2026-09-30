@@ -14,6 +14,11 @@ test('deployment state machine allows only forward orchestration transitions',()
     ['building','failed'],
     ['deploying','failed'],
     ['health-checking','failed'],
+    ['queued','cancelled'],
+    ['cloning','cancelled'],
+    ['building','cancelled'],
+    ['deploying','cancelled'],
+    ['health-checking','cancelled'],
     ['successful','rolled-back']
   ];
   for(const [from,to] of allowed)assert.equal(canTransitionDeployment(from,to),true,`${from} -> ${to}`);
@@ -28,6 +33,8 @@ test('deployment state machine rejects skips, retries and terminal-state mutatio
   assert.equal(canTransitionDeployment('failed','queued'),false);
   assert.equal(canTransitionDeployment('rolled-back','queued'),false);
   assert.equal(canTransitionDeployment('successful','failed'),false);
+  assert.equal(canTransitionDeployment('cancelled','queued'),false);
+  assert.equal(canTransitionDeployment('cancelled','successful'),false);
 });
 
 

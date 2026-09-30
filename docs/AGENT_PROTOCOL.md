@@ -141,3 +141,12 @@ During `deployment.execute`, the Agent may emit:
 Allowed stages are `cloning`, `building`, `deploying`, and `health-checking`. Allowed streams are `system`, `build`, `stdout`, and `stderr`. Empty lines and control characters are discarded; each line is capped at 4,000 characters before transmission.
 
 Dockerfile and Compose builds forward bounded Docker Engine build/pull status output. After a newly created container reaches readiness, the Agent forwards a bounded tail of container runtime logs. These envelopes never include the GitHub installation token, which is used only for the source archive request.
+
+
+### Targeted deployment cancellation
+
+`deployment.cancel` accepts only a deployment UUID. The Agent maintains a process-local map from active deployment IDs to Go context cancellation functions. It does not accept PIDs, container IDs, shell commands, signals, or arbitrary process selectors.
+
+When cancellation is requested, only the matching deployment context is cancelled. Source downloads and Docker Engine requests inherit this context. Runtime recovery paths use independent cleanup contexts so cancellation does not prevent restoration of the previously active container/project.
+
+A cancellation command returns whether an active matching deployment execution was found. The API does not treat that acknowledgement as completion; the durable deployment state changes to `cancelled` only after the deployment worker observes the execution command stop.
