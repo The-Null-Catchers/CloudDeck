@@ -82,7 +82,7 @@ export default function NewApplicationPage(){
   async function connectGitHub(){
     if(!org)return;setBusy(true);setError('');
     try{
-      const result=await api<{url:string}>(`/organizations/${org.id}/github/connect`,{method:'POST'});
+      const result=await api<{url:string}>(`/organizations/${org.id}/github/connect`,{method:'POST',body:JSON.stringify({returnTo:'/applications/new'})});
       window.location.assign(result.url);
     }catch(e){setError(e instanceof Error?e.message:'Unable to start GitHub connection');setBusy(false)}
   }
