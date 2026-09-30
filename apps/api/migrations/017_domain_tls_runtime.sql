@@ -10,7 +10,7 @@ ALTER TABLE domains
   ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now();
 
 ALTER TABLE alerts
-  ADD COLUMN domain_id uuid REFERENCES domains(id) ON DELETE CASCADE;
+  ADD COLUMN domain_id uuid REFERENCES domains(id) ON DELETE SET NULL;
 
 CREATE INDEX domains_tls_due_idx
   ON domains(next_tls_check_at)
