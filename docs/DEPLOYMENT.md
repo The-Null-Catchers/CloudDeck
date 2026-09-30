@@ -233,3 +233,28 @@ The web UI loads durable history, then requests a short-lived one-time stream ti
 Build output comes from Docker Engine build/pull JSON streams. Runtime output is captured from the newly started container(s) during readiness. Application stdout/stderr may contain sensitive application data, so deployment log access requires `deployment.read` within the owning workspace.
 
 BullMQ jobs continue to contain only the deployment UUID. GitHub installation credentials are never persisted into deployment logs.
+
+
+## Deployment cancellation
+
+Queued and active deployments can be cancelled through:
+
+`POST /api/v1/deployments/:deploymentId/cancel`
+
+with:
+
+```json
+{"confirm":true}
+```
+
+The endpoint requires `deployment.manage`. Cancellation is durable and uses `cancel_requested_at` rather than optimistically marking an active deployment cancelled.
+
+- If the deployment is still queued, CloudDeck removes the BullMQ job when possible and transitions `queued -> cancelled` before execution begins.
+- If execution has started, CloudDeck records the cancellation request and sends the typed `deployment.cancel` action to the target Agent.
+- The Agent cancels only the context registered for that deployment UUID.
+- Dockerfile replacement rollback uses an independent cleanup context so cancelling the execution cannot also cancel recovery of the previous runtime.
+- Compose partial-deployment recovery already uses independent cleanup operations.
+- The worker transitions an interrupted deployment to `cancelled` only after the execution command has actually returned.
+- If activation completed successfully before the cancellation reached the Agent, the deployment remains `successful`; CloudDeck clears the stale cancellation request and records that completion won the race.
+
+`cancelled` is terminal. It cannot be resumed or mutated into `successful`. A new deployment request must be created for another attempt.
