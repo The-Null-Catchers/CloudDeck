@@ -41,10 +41,17 @@ async function applicationForDomain(applicationId:string,organizationId:string){
   };
 }
 
-function resolveTargetPort(application:{deployment_type:'dockerfile'|'compose'|null;host_port:number|null},requested:number|undefined){
-  const resolved=requested??application.host_port??undefined;
-  if(!resolved)throw Object.assign(new Error('A target port is required when the application has no configured host port'),{statusCode:400});
-  return port.parse(resolved);
+export function resolveDomainTargetPort(application:{deployment_type:'dockerfile'|'compose'|null;host_port:number|null},requested:number|undefined){
+  if(application.deployment_type==='dockerfile'&&application.host_port){
+    if(requested!==undefined&&requested!==application.host_port){
+      throw Object.assign(new Error('Dockerfile domains must target the application host port'),{statusCode:400});
+    }
+    return port.parse(application.host_port);
+  }
+  if(requested===undefined){
+    throw Object.assign(new Error('A target port is required when the application has no configured host port'),{statusCode:400});
+  }
+  return port.parse(requested);
 }
 
 export async function domainRoutes(app:FastifyInstance){
@@ -76,7 +83,7 @@ export async function domainRoutes(app:FastifyInstance){
     await membership(userId,orgId,'domain.manage');
     const application=await applicationForDomain(body.applicationId,orgId);
     const hostname=normalizeDomainHostname(body.hostname);
-    const targetPort=resolveTargetPort(application,body.targetPort);
+    const targetPort=resolveDomainTargetPort(application,body.targetPort);
     let created;
     try{
       created=await pool.query(
@@ -116,7 +123,7 @@ export async function domainRoutes(app:FastifyInstance){
     const row=current.rows[0];
     await membership(userId,row.organization_id,'domain.manage');
     const hostname=body.hostname===undefined?row.hostname:normalizeDomainHostname(body.hostname);
-    const targetPort=body.targetPort===undefined?row.target_port:resolveTargetPort(row,body.targetPort);
+    const targetPort=body.targetPort===undefined?row.target_port:resolveDomainTargetPort(row,body.targetPort);
     const nextProxyType=body.proxyType??row.proxy_type;
     const enabled=body.enabled??row.enabled;
     let updated;
