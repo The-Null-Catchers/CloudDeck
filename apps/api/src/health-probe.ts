@@ -80,7 +80,7 @@ export function normalizeHealthTarget(kind:HealthKind,target:string){
   }
   let parsed:URL;
   try{parsed=new URL('tcp://'+value)}catch{throw Object.assign(new Error('TCP target must be host:port'),{statusCode:400})}
-  if(!parsed.hostname||!parsed.port||parsed.username||parsed.password||parsed.search||parsed.hash||parsed.pathname!=='/')throw Object.assign(new Error('TCP target must be host:port'),{statusCode:400});
+  if(!parsed.hostname||!parsed.port||parsed.username||parsed.password||parsed.search||parsed.hash||(parsed.pathname&&parsed.pathname!=='/'))throw Object.assign(new Error('TCP target must be host:port'),{statusCode:400});
   const port=Number(parsed.port);
   if(!Number.isInteger(port)||port<1||port>65535)throw Object.assign(new Error('Invalid TCP port'),{statusCode:400});
   return value;
