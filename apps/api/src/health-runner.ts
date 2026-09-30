@@ -1,3 +1,4 @@
+import type pg from 'pg';
 import {pool,transaction} from './db.js';
 import {probeHealthTarget,type HealthKind,type HealthProbeResult} from './health-probe.js';
 
@@ -38,7 +39,7 @@ export async function claimDueHealthChecks(limit=20){
   });
 }
 
-async function notifyOrganization(orgId:string,alertId:string,type:string,title:string,db:Parameters<Parameters<typeof transaction>[0]>[0]){
+async function notifyOrganization(orgId:string,alertId:string,type:string,title:string,db:Pick<pg.PoolClient,'query'>){
   await db.query(
     `INSERT INTO notifications(user_id,alert_id,type,title)
      SELECT user_id,$2,$3,$4
