@@ -72,6 +72,17 @@ func deploymentHTTPClient(timeout time.Duration)(*http.Client,error){
 func emitDeploymentProgress(write func(any)error,id,stage,message string){
  _=write(map[string]any{"type":"deployment.progress","deploymentId":id,"stage":stage,"message":message})
 }
+func emitDeploymentLog(write func(any)error,id,stage,stream,line string){
+ line=strings.TrimSpace(line);if line==""{return}
+ filtered:=strings.Map(func(r rune)rune{if r=='\t'||r>=32{return r};return -1},line)
+ if len(filtered)>4000{filtered=filtered[:4000]}
+ if filtered==""{return}
+ _=write(map[string]any{"type":"deployment.log","deploymentId":id,"stage":stage,"stream":stream,"line":filtered})
+}
+func emitContainerRuntimeLogs(write func(any)error,deploymentID,containerID string){
+ lines,_,err:=tailContainerLogs(containerID,100);if err!=nil{return}
+ for _,line:=range lines{emitDeploymentLog(write,deploymentID,"health-checking","stdout",line)}
+}
 
 func downloadDeploymentSource(ctx context.Context,p deploymentExecutePayload)(string,error){
  root,err:=os.MkdirTemp("","clouddeck-deploy-*");if err!=nil{return "",err}
@@ -120,7 +131,7 @@ func writeBuildContext(ctx context.Context,root string,w io.Writer)error{
  })
 }
 
-func buildDeploymentImage(ctx context.Context,root string,p deploymentExecutePayload)(string,error){
+func buildDeploymentImage(ctx context.Context,root string,p deploymentExecutePayload,write func(any)error)(string,error){
  imageRef:="clouddeck/"+strings.ToLower(p.DeploymentID)+":"+strings.ToLower(p.CommitSHA[:12])
  client,err:=deploymentHTTPClient(20*time.Minute);if err!=nil{return "",err}
  pr,pw:=io.Pipe()
@@ -132,7 +143,11 @@ func buildDeploymentImage(ctx context.Context,root string,p deploymentExecutePay
  defer res.Body.Close();if res.StatusCode<200||res.StatusCode>=300{return "",fmt.Errorf("Docker build returned HTTP %d",res.StatusCode)}
  dec:=json.NewDecoder(io.LimitReader(res.Body,32<<20))
  for {
-  var msg struct{Error string `json:"error"`};err:=dec.Decode(&msg);if errors.Is(err,io.EOF){break};if err!=nil{return "",errors.New("Invalid Docker build response")};if msg.Error!=""{return "",errors.New("Docker build failed")}
+  var msg struct{Stream string `json:"stream"`;Status string `json:"status"`;Progress string `json:"progress"`;Error string `json:"error"`}
+  err:=dec.Decode(&msg);if errors.Is(err,io.EOF){break};if err!=nil{return "",errors.New("Invalid Docker build response")}
+  if msg.Stream!=""{for _,line:=range strings.Split(msg.Stream,"\n"){emitDeploymentLog(write,p.DeploymentID,"building","build",line)}}
+  if msg.Status!=""{line:=msg.Status;if msg.Progress!=""{line+=" "+msg.Progress};emitDeploymentLog(write,p.DeploymentID,"building","build",line)}
+  if msg.Error!=""{emitDeploymentLog(write,p.DeploymentID,"building","stderr",msg.Error);return "",errors.New("Docker build failed")}
  }
  return imageRef,nil
 }
@@ -164,9 +179,10 @@ func rollbackContainer(ctx context.Context,client *http.Client,newID,oldID,oldNa
  }
 }
 
-func deployBuiltImage(ctx context.Context,p deploymentExecutePayload,imageRef string)(deploymentExecuteResult,error){
+func deployBuiltImage(ctx context.Context,p deploymentExecutePayload,imageRef string,write func(any)error)(deploymentExecuteResult,error){
  var out deploymentExecuteResult
  client,err:=deploymentHTTPClient(5*time.Minute);if err!=nil{return out,err};name:=*p.Runtime.ContainerName
+ emitDeploymentLog(write,p.DeploymentID,"deploying","system","Preparing runtime target "+name)
  oldID,oldRunning,_,err:=inspectNamedContainer(ctx,client,name);if err!=nil{return out,err}
  backupName:=""
  if oldID!=""{
@@ -182,13 +198,17 @@ func deployBuiltImage(ctx context.Context,p deploymentExecutePayload,imageRef st
  encoded,_:=json.Marshal(config);res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/create?name="+url.QueryEscape(name),strings.NewReader(string(encoded)));if err!=nil{rollbackContainer(ctx,client,"",oldID,name,oldRunning);return out,err}
  if res.StatusCode<200||res.StatusCode>=300{_ = expectDockerStatus(res,201);rollbackContainer(ctx,client,"",oldID,name,oldRunning);return out,errors.New("Docker container create failed")}
  var created struct{ID string `json:"Id"`};decodeErr:=json.NewDecoder(io.LimitReader(res.Body,64<<10)).Decode(&created);res.Body.Close();if decodeErr!=nil||created.ID==""{rollbackContainer(ctx,client,"",oldID,name,oldRunning);return out,errors.New("Invalid Docker create response")}
+ emitDeploymentLog(write,p.DeploymentID,"deploying","system","Created container "+created.ID[:12])
  start,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(created.ID)+"/start",nil);if err!=nil{rollbackContainer(ctx,client,created.ID,oldID,name,oldRunning);return out,err};if err:=expectDockerStatus(start,204,304);err!=nil{rollbackContainer(ctx,client,created.ID,oldID,name,oldRunning);return out,err}
+ emitDeploymentLog(write,p.DeploymentID,"deploying","system","Container started; waiting for readiness")
  deadline:=time.Now().Add(30*time.Second)
  for {
   _,running,healthy,err:=inspectNamedContainer(ctx,client,created.ID);if err!=nil{rollbackContainer(ctx,client,created.ID,oldID,name,oldRunning);return out,err}
-  if running&&healthy{break};if time.Now().After(deadline){rollbackContainer(ctx,client,created.ID,oldID,name,oldRunning);return out,errors.New("Container readiness check failed")}
+  if running&&healthy{break};if time.Now().After(deadline){emitContainerRuntimeLogs(write,p.DeploymentID,created.ID);rollbackContainer(ctx,client,created.ID,oldID,name,oldRunning);return out,errors.New("Container readiness check failed")}
   select{case <-ctx.Done():rollbackContainer(context.Background(),client,created.ID,oldID,name,oldRunning);return out,ctx.Err();case <-time.After(2*time.Second):}
  }
+ emitDeploymentLog(write,p.DeploymentID,"health-checking","system","Container readiness verified")
+ emitContainerRuntimeLogs(write,p.DeploymentID,created.ID)
  out=deploymentExecuteResult{ContainerID:created.ID,ImageRef:imageRef};if oldID!=""{out.PreviousContainerID=&oldID};return out,nil
 }
 
@@ -197,15 +217,17 @@ func executeDeploymentCommand(ctx context.Context,command agentCommand,write fun
  var p deploymentExecutePayload
  if command.Type!="command"||command.RequestID==""||decodeStrict(command.Payload,&p)!=nil||validateDeploymentPayload(p)!=nil{result.Error="Invalid deployment request";_ = write(result);return}
  emitDeploymentProgress(write,p.DeploymentID,"cloning","Downloading pinned GitHub source")
- root,err:=downloadDeploymentSource(ctx,p);if err!=nil{result.Error=err.Error();_ = write(result);return};defer os.RemoveAll(root)
+ emitDeploymentLog(write,p.DeploymentID,"cloning","system","Downloading pinned commit "+p.CommitSHA[:12]+" from "+p.RepositoryFullName)
+ root,err:=downloadDeploymentSource(ctx,p);if err!=nil{emitDeploymentLog(write,p.DeploymentID,"cloning","stderr",err.Error());result.Error=err.Error();_ = write(result);return};defer os.RemoveAll(root)
+ emitDeploymentLog(write,p.DeploymentID,"cloning","system","Pinned source archive extracted")
  if p.DeploymentType=="compose"{
   deployed,err:=deployComposeProject(ctx,root,p,write);if err!=nil{result.Error=err.Error();_ = write(result);return}
   result.Success=true;result.Data=deployed;_ = write(result);return
  }
  emitDeploymentProgress(write,p.DeploymentID,"building","Building Docker image through Docker Engine API")
- imageRef,err:=buildDeploymentImage(ctx,root,p);if err!=nil{result.Error=err.Error();_ = write(result);return}
+ imageRef,err:=buildDeploymentImage(ctx,root,p,write);if err!=nil{result.Error=err.Error();_ = write(result);return}
  emitDeploymentProgress(write,p.DeploymentID,"deploying","Activating the built container")
- deployed,err:=deployBuiltImage(ctx,p,imageRef);if err!=nil{result.Error=err.Error();_ = write(result);return}
+ deployed,err:=deployBuiltImage(ctx,p,imageRef,write);if err!=nil{result.Error=err.Error();_ = write(result);return}
  emitDeploymentProgress(write,p.DeploymentID,"health-checking","Container started; readiness verified")
  result.Success=true;result.Data=deployed;_ = write(result)
 }
