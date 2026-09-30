@@ -7,7 +7,7 @@ import {isPublicHealthAddress} from './health-probe.js';
 const label=/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export function normalizeDomainHostname(input:string){
-  const raw=input.trim().replace(/.$/,'').toLowerCase();
+  const raw=input.trim().replace(/[.]$/,'').toLowerCase();
   const hostname=domainToASCII(raw).toLowerCase();
   if(!hostname||hostname.length>253||net.isIP(hostname))throw Object.assign(new Error('Domain must be a DNS hostname'),{statusCode:400});
   const labels=hostname.split('.');
