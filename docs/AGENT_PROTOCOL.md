@@ -38,6 +38,8 @@ Current allowlist includes explicit Docker inventory, lifecycle, inspection, and
 - `systemd.stopService`
 - `systemd.restartService`
 - `systemd.tailLogs`
+- `backup.execute`
+- `backup.deleteLocal`
 
 Compose operations resolve containers by `com.docker.compose.project` and `com.docker.compose.service` labels and then call the Docker Engine API. They do not invoke a shell or depend on the Docker Compose CLI. Project and service names are strictly validated. Container inspection intentionally excludes environment variables and command arguments.
 
@@ -150,3 +152,14 @@ Dockerfile and Compose builds forward bounded Docker Engine build/pull status ou
 When cancellation is requested, only the matching deployment context is cancelled. Source downloads and Docker Engine requests inherit this context. Runtime recovery paths use independent cleanup contexts so cancellation does not prevent restoration of the previously active container/project.
 
 A cancellation command returns whether an active matching deployment execution was found. The API does not treat that acknowledgement as completion; the durable deployment state changes to `cancelled` only after the deployment worker observes the execution command stop.
+
+
+## Verified local backup commands
+
+`backup.execute` is a long-running typed action with exactly four fields: backup UUID, kind, source, and target type. The current implementation accepts only `directory` and `docker_volume` sources and only the `local` target. It never accepts shell text or a destination filesystem path from the API.
+
+Directory sources must resolve inside one of the comma-separated absolute roots configured in `CLOUDDECK_BACKUP_SOURCE_ROOTS`. Symlinks and special files are rejected while walking the source tree. Local Docker-volume backups accept only strict volume names, require the Docker `local` driver, and require the resolved mountpoint to stay under `CLOUDDECK_DOCKER_VOLUME_ROOT` (default `/var/lib/docker/volumes`).
+
+Archives are written under the Agent-controlled `CLOUDDECK_BACKUP_DIR` (default `/var/lib/clouddeck-agent/backups`) with mode 0600. The filename is derived only from the CloudDeck backup UUID. After closing and syncing the gzip/tar archive, the Agent reopens and fully reads it, rejects unsafe entry paths, and only then returns `verified:true`, SHA-256, size, and entry count. The API cannot persist a backup as `successful` without that validated result.
+
+`backup.deleteLocal` accepts only a UUID-derived `<backup-id>.tar.gz` storage key. It is used for retention cleanup and confirmed backup-job deletion, and never accepts an arbitrary path.
