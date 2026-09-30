@@ -13,7 +13,7 @@ const ticketBody=z.object({
   afterId:z.number().int().nonnegative().default(0)
 }).strict();
 const streamQuery=z.object({ticket:z.string().min(20),afterId:z.coerce.number().int().nonnegative().default(0)}).strict();
-const terminalStates=new Set(['successful','failed','rolled-back']);
+const terminalStates=new Set(['successful','failed','cancelled','rolled-back']);
 
 async function deploymentAccess(deploymentId:string,userId:string){
   const result=await pool.query(
