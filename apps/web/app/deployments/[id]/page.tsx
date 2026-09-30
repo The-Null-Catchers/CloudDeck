@@ -4,7 +4,7 @@ import {useEffect,useMemo,useState} from 'react';
 import {useParams,useRouter} from 'next/navigation';
 import {
   Activity,ArrowLeft,Boxes,CheckCircle2,Clock3,GitBranch,GitCommit,OctagonAlert,
-  RefreshCw,RotateCcw,Server,ShieldCheck,TimerReset,Workflow,XCircle,ScrollText,Radio
+  RefreshCw,RotateCcw,Server,ShieldCheck,TimerReset,Workflow,XCircle,ScrollText,Radio,CircleStop
 } from 'lucide-react';
 import {api,openDeploymentLogStream,type DeploymentLogRow} from '@/lib/api';
 
@@ -12,7 +12,7 @@ type DeploymentEvent={id:number;state:string;message:string|null;created_at:stri
 type DeploymentDetail={
   id:string;application_id:string;application_name:string;organization_id:string;
   commit_sha:string|null;branch:string|null;state:string;created_at:string;started_at:string|null;
-  finished_at:string|null;failure_code:string|null;requested_by:string|null;
+  finished_at:string|null;failure_code:string|null;requested_by:string|null;cancel_requested_at:string|null;cancelled_by:string|null;
   repository_full_name:string|null;deployment_type:'dockerfile'|'compose'|null;source_path:string|null;
   container_name:string|null;container_port:number|null;host_port:number|null;restart_policy:string|null;
   compose_project:string|null;image_ref:string|null;container_id:string|null;previous_container_id:string|null;
@@ -20,7 +20,7 @@ type DeploymentDetail={
   events:DeploymentEvent[];
 };
 
-const terminalStates=new Set(['successful','failed','rolled-back']);
+const terminalStates=new Set(['successful','failed','cancelled','rolled-back']);
 const stages=['queued','cloning','building','deploying','health-checking','successful'] as const;
 
 function shortSha(value:string|null){return value?value.slice(0,12):'—'}
@@ -35,6 +35,8 @@ export default function DeploymentDetailPage(){
   const [loading,setLoading]=useState(true);
   const [rollbackConfirm,setRollbackConfirm]=useState(false);
   const [rollingBack,setRollingBack]=useState(false);
+  const [cancelConfirm,setCancelConfirm]=useState(false);
+  const [cancelling,setCancelling]=useState(false);
   const [logs,setLogs]=useState<DeploymentLogRow[]>([]);
   const [logStatus,setLogStatus]=useState<'connecting'|'live'|'complete'|'error'>('connecting');
   const [logFilter,setLogFilter]=useState<'all'|'build'|'runtime'|'errors'>('all');
@@ -129,6 +131,21 @@ export default function DeploymentDetailPage(){
     finally{setRollingBack(false)}
   }
 
+  async function cancelDeployment(){
+    if(!deployment)return;
+    setCancelling(true);setError('');
+    try{
+      await api(`/deployments/${deployment.id}/cancel`,{
+        method:'POST',
+        body:JSON.stringify({confirm:true})
+      });
+      setCancelConfirm(false);
+      setDeployment(current=>current?{...current,cancel_requested_at:new Date().toISOString()}:current);
+      await load(true);
+    }catch(e){setError(e instanceof Error?e.message:'Cancellation request failed')}
+    finally{setCancelling(false)}
+  }
+
   const rollbackAvailable=useMemo(()=>{
     if(!deployment||deployment.state!=='successful')return false;
     if(deployment.deployment_type==='dockerfile')return Boolean(deployment.container_id&&deployment.previous_container_id);
@@ -139,7 +156,12 @@ export default function DeploymentDetailPage(){
     return false;
   },[deployment]);
 
-  const currentStageIndex=deployment?stages.indexOf(deployment.state as typeof stages[number]):-1;
+  const currentStageIndex=deployment
+    ? deployment.state==='cancelled'
+      ? Math.max(0,...deployment.events.map(event=>stages.indexOf(event.state as typeof stages[number])).filter(index=>index>=0))
+      : stages.indexOf(deployment.state as typeof stages[number])
+    : -1;
+  const cancelAvailable=Boolean(deployment&&!terminalStates.has(deployment.state)&&!deployment.cancel_requested_at);
   const visibleLogs=logs.filter(row=>{
     if(logFilter==='all')return true;
     if(logFilter==='build')return row.stream==='build';
@@ -167,9 +189,16 @@ export default function DeploymentDetailPage(){
             </div>
           </div>
           <div className="deploy-detail-actions">
+            {cancelAvailable&&<button className="cancel-button" onClick={()=>setCancelConfirm(true)}><CircleStop size={15}/> Cancel deployment</button>}
+            {deployment.cancel_requested_at&&!terminalStates.has(deployment.state)&&<button className="cancel-button pending" disabled><CircleStop size={15}/> Cancelling…</button>}
             {rollbackAvailable&&<button className="rollback-button" onClick={()=>setRollbackConfirm(true)}><RotateCcw size={15}/> Roll back</button>}
           </div>
         </section>
+
+        {cancelConfirm&&<section className="rollback-confirm cancel-confirm">
+          <div><OctagonAlert size={21}/><span><strong>Cancel this deployment?</strong><small>CloudDeck will stop only this deployment execution. If runtime replacement already started, the Agent attempts to restore the previous runtime before cancellation completes.</small></span></div>
+          <div><button onClick={()=>setCancelConfirm(false)} disabled={cancelling}>Keep running</button><button className="danger-solid" onClick={()=>void cancelDeployment()} disabled={cancelling}>{cancelling?'Requesting…':'Confirm cancellation'}</button></div>
+        </section>}
 
         {rollbackConfirm&&<section className="rollback-confirm">
           <div><OctagonAlert size={21}/><span><strong>Confirm rollback</strong><small>This restores the previous {deployment.deployment_type==='compose'?'Compose project':'container'} and waits for readiness before changing deployment state.</small></span></div>
@@ -183,13 +212,15 @@ export default function DeploymentDetailPage(){
               const reached=currentStageIndex>=index||deployment.state==='successful'||deployment.state==='rolled-back';
               const active=deployment.state===stage;
               const failed=deployment.state==='failed'&&index===Math.max(0,deployment.events.findIndex(event=>event.state==='failed')-1);
-              return <div className={`pipeline-stage ${reached?'reached':''} ${active?'active':''} ${failed?'failed':''}`} key={stage}>
-                <span>{failed?<XCircle size={15}/>:reached?<CheckCircle2 size={15}/>:<Clock3 size={15}/>}</span>
+              const cancelled=deployment.state==='cancelled'&&index===currentStageIndex;
+              return <div className={`pipeline-stage ${reached?'reached':''} ${active?'active':''} ${failed?'failed':''} ${cancelled?'cancelled':''}`} key={stage}>
+                <span>{failed?<XCircle size={15}/>:cancelled?<CircleStop size={15}/>:reached?<CheckCircle2 size={15}/>:<Clock3 size={15}/>}</span>
                 <strong>{stateText(stage)}</strong>
               </div>
             })}
           </div>
           {deployment.state==='failed'&&<div className="deployment-failure"><XCircle size={16}/><span><strong>{deployment.failure_code??'DEPLOYMENT_FAILED'}</strong> The deployment stopped safely before being marked successful.</span></div>}
+          {deployment.state==='cancelled'&&<div className="deployment-cancelled"><CircleStop size={16}/><span><strong>Deployment cancelled.</strong> Execution stopped before CloudDeck marked it successful.</span></div>}
         </section>
 
         <section className="deploy-detail-grid">
@@ -251,7 +282,7 @@ export default function DeploymentDetailPage(){
           <div className="deploy-section-head"><div><h2>Timeline</h2><p>Append-only deployment events.</p></div><span>{deployment.events.length} events</span></div>
           <div className="deployment-timeline">
             {deployment.events.map((event,index)=><div className="timeline-event" key={event.id}>
-              <span className={`timeline-dot ${event.state}`}>{event.state==='failed'?<XCircle size={14}/>:<CheckCircle2 size={14}/>}</span>
+              <span className={`timeline-dot ${event.state}`}>{event.state==='failed'?<XCircle size={14}/>:event.state==='cancelled'?<CircleStop size={14}/>:<CheckCircle2 size={14}/>}</span>
               <div><strong>{stateText(event.state)}</strong><p>{event.message??'State transition recorded.'}</p><small>{time(event.created_at)}</small></div>
               <em>{String(index+1).padStart(2,'0')}</em>
             </div>)}
