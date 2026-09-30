@@ -43,3 +43,12 @@ Reverse-proxy mutation is intentionally not performed by the unprivileged agent 
 Secret metadata is stored in `secrets` while encrypted values live in the separate `secret_values` table. Values use AES-256-GCM with a fresh 96-bit IV per write and a versioned key reference. The API never returns plaintext secret values; list/create/update responses expose metadata and a configured-value marker only.
 
 The current key provider reads a 32-byte base64 master key from `CLOUDDECK_MASTER_KEY` at encryption/decryption time. This keeps the crypto boundary isolated behind `secret-crypto.ts` so a KMS/Vault provider and multi-version key rotation can replace local key material later without changing the database or public API contract. Server-side consumers must resolve values through the internal service helper rather than adding a reveal endpoint.
+
+
+## Verified local backups
+
+Backup jobs belong to an organization and target one managed server. The first executable backup slice supports manual directory and local Docker-volume jobs with Agent-local storage. Job metadata lives in PostgreSQL, while archive contents remain on the managed server.
+
+A run creates a durable `backups` row before dispatch. The API then issues the typed `backup.execute` action over the already-authenticated outbound Agent channel. The Agent creates a gzip/tar archive under its configured backup directory, computes SHA-256, closes and syncs the file, reopens the archive, and reads every entry for structural verification. Only a result containing `verified:true` can transition the durable row to `successful`; failures transition it to `failed` with a bounded error.
+
+Retention never deletes only PostgreSQL metadata. Once the configured successful-backup count is exceeded, CloudDeck asks the Agent to remove the UUID-derived local archive first and deletes the corresponding row only after the constrained delete succeeds. Database dumps, S3-compatible targets, encryption of backup payloads, durable scheduled dispatch, and restore workflows remain separate follow-up slices.
