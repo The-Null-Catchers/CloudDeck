@@ -40,6 +40,15 @@ const createBody=z.discriminatedUnion('kind',[
     retentionCount:z.number().int().min(1).max(100).default(7)
   }).strict()
 ]);
+export function parseDatabaseBackupSecret(value:string){
+  let decoded:unknown;
+  try{decoded=JSON.parse(value)}
+  catch{throw Object.assign(new Error('Database backup source secret is invalid'),{statusCode:400})}
+  const parsed=databaseSecret.safeParse(decoded);
+  if(!parsed.success)throw Object.assign(new Error('Database backup source secret is invalid'),{statusCode:400});
+  return parsed.data;
+}
+
 const runResult=z.object({
   storageKey:z.string().min(1).max(500),
   sizeBytes:z.number().int().nonnegative(),
@@ -155,9 +164,7 @@ export async function backupRoutes(app:FastifyInstance){
         let plaintext='';
         try{
           plaintext=await readSecretValueForService(job.source_secret_id,job.organization_id);
-          database=databaseSecret.parse(JSON.parse(plaintext));
-        }catch{
-          throw Object.assign(new Error('Database backup source secret is invalid'),{statusCode:400});
+          database=parseDatabaseBackupSecret(plaintext);
         }finally{
           plaintext='';
         }
