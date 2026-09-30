@@ -1,4 +1,4 @@
-import {Worker} from 'bullmq';
+import {DelayedError,Worker} from 'bullmq';
 import {Redis} from 'ioredis';
 import {z} from 'zod';
 import {pool} from './db.js';
@@ -14,6 +14,7 @@ import {
   type DeploymentProgressStage
 } from './commands.js';
 import {canTransitionDeployment,transitionDeployment,type DeploymentState} from './deployments.js';
+import {acquireDeploymentLease,releaseDeploymentLease,startDeploymentLeaseHeartbeat} from './deployment-leases.js';
 
 const dockerWorkerResult=z.object({
   containerId:z.string().regex(/^[a-f0-9]{12,64}$/i),
@@ -42,7 +43,7 @@ async function deploymentSnapshot(deploymentId:string){
   const result=await pool.query(
     `SELECT d.id,d.state,d.commit_sha,d.repository_full_name,d.deployment_type,d.source_path,
             d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project,
-            d.cancel_requested_at,a.organization_id,a.server_id,g.installation_id
+            d.cancel_requested_at,d.application_id,a.organization_id,a.server_id,g.installation_id
      FROM deployments d
      JOIN applications a ON a.id=d.application_id
      LEFT JOIN github_installations g ON g.id=d.github_installation_id
@@ -51,6 +52,7 @@ async function deploymentSnapshot(deploymentId:string){
   );
   return result.rows[0] as undefined|{
     id:string;
+    application_id:string;
     state:DeploymentState;
     commit_sha:string|null;
     repository_full_name:string|null;
@@ -86,7 +88,7 @@ async function advanceTo(deploymentId:string,target:DeploymentProgressStage,mess
   }
 }
 
-async function finishInterruptedDeployment(deploymentId:string,message:string){
+async function finishInterruptedDeployment(deploymentId:string,message:string,failureCode='DEPLOYMENT_EXECUTION_FAILED'){
   const current=await pool.query('SELECT state,cancel_requested_at FROM deployments WHERE id=$1',[deploymentId]);
   const state=current.rows[0]?.state as DeploymentState|undefined;
   if(!state||state==='failed'||state==='successful'||state==='cancelled'||state==='rolled-back')return;
@@ -96,7 +98,7 @@ async function finishInterruptedDeployment(deploymentId:string,message:string){
   }
   if(canTransitionDeployment(state,'failed')){
     await transitionDeployment(deploymentId,'failed',{
-      failureCode:'DEPLOYMENT_EXECUTION_FAILED',
+      failureCode,
       message:message.slice(0,500)
     });
   }
@@ -107,6 +109,11 @@ export async function processDeploymentJob(deploymentId:string){
   if(!snapshot)return {status:'missing' as const};
   if(snapshot.state!=='queued')return {status:'skipped' as const,state:snapshot.state};
   if(snapshot.cancel_requested_at){await transitionDeployment(deploymentId,'cancelled',{message:'Deployment cancelled before execution'});return {status:'cancelled' as const};}
+  const leaseToken=await acquireDeploymentLease(snapshot.application_id,deploymentId);
+  if(!leaseToken)return {status:'deferred' as const,reason:'application_busy' as const};
+  let stopLeaseHeartbeat=()=>{};
+  let leaseLost=false;
+  try{
   if(!snapshot.server_id)throw new Error('Deployment target server is missing');
   if(!isAgentConnected(snapshot.server_id))throw Object.assign(new Error('Target agent is not connected'),{code:'AGENT_UNAVAILABLE'});
   if(!snapshot.installation_id||!snapshot.commit_sha||!snapshot.repository_full_name||!snapshot.deployment_type||!snapshot.source_path){
@@ -122,6 +129,17 @@ export async function processDeploymentJob(deploymentId:string){
     progressChain=progressChain.then(()=>advanceTo(deploymentId,progress.stage,progress.message));
     return progressChain;
   });
+  stopLeaseHeartbeat=startDeploymentLeaseHeartbeat(
+    snapshot.application_id,
+    deploymentId,
+    leaseToken,
+    async()=>{
+      leaseLost=true;
+      if(snapshot.server_id&&isAgentConnected(snapshot.server_id)){
+        try{await sendAgentCommand(snapshot.server_id,'deployment.cancel',{deploymentId},15_000);}catch{void 0}
+      }
+    }
+  );
   registerDeploymentLogHandler(deploymentId,entry=>{
     logChain=logChain.then(async()=>{
       await pool.query(
@@ -196,11 +214,15 @@ export async function processDeploymentJob(deploymentId:string){
     await progressChain.catch(()=>{});
     await logChain.catch(()=>{});
     const message=error instanceof Error?error.message:'Deployment execution failed';
-    await finishInterruptedDeployment(deploymentId,message);
+    await finishInterruptedDeployment(deploymentId,message,leaseLost?'DEPLOYMENT_LEASE_LOST':'DEPLOYMENT_EXECUTION_FAILED');
     return {status:'failed' as const};
   }finally{
     unregisterDeploymentProgress(deploymentId);
     unregisterDeploymentLogHandler(deploymentId);
+  }
+  }finally{
+    stopLeaseHeartbeat();
+    await releaseDeploymentLease(snapshot.application_id,deploymentId,leaseToken).catch(()=>false);
   }
 }
 
@@ -214,9 +236,14 @@ export function startDeploymentWorker(){
   workerConnection.on('error',()=>{});
   worker=new Worker(
     deploymentQueueName,
-    async job=>{
+    async (job,token)=>{
       const parsed=z.object({deploymentId:z.uuid()}).strict().parse(job.data);
-      return processDeploymentJob(parsed.deploymentId);
+      const result=await processDeploymentJob(parsed.deploymentId);
+      if(result.status==='deferred'){
+        await job.moveToDelayed(Date.now()+15_000,token);
+        throw new DelayedError();
+      }
+      return result;
     },
     {connection:workerConnection,concurrency:2}
   );
