@@ -20,52 +20,8 @@ import (
 )
 
 var backupIDPattern=regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
-var backupVolumeName=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}package main
-
-import (
- "archive/tar"
- "compress/gzip"
- "context"
- "crypto/sha256"
- "encoding/hex"
- "encoding/json"
- "errors"
- "fmt"
- "io"
- "net/http"
- "net/url"
- "os"
- "path/filepath"
- "regexp"
- "strconv"
- "strings"
-)
-
-var backupIDPattern=regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
-)
-var backupStorageKey=regexp.MustCompile(`^[0-9a-fA-F-]{36}\\.tar\\.gzpackage main
-
-import (
- "archive/tar"
- "compress/gzip"
- "context"
- "crypto/sha256"
- "encoding/hex"
- "encoding/json"
- "errors"
- "fmt"
- "io"
- "net/http"
- "net/url"
- "os"
- "path/filepath"
- "regexp"
- "strconv"
- "strings"
-)
-
-var backupIDPattern=regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
-)
+var backupVolumeName=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+var backupStorageKey=regexp.MustCompile(`^[0-9a-fA-F-]{36}\.tar\.gz$`)
 
 type backupExecutePayload struct {
  BackupID string `json:"backupId"`
