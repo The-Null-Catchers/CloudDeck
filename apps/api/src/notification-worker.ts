@@ -25,11 +25,10 @@ async function claimDelivery(id:string){
        WHERE id=$1 AND status='pending'
        RETURNING notification_id,attempts
      )
-     SELECT c.attempts,n.title,n.body,n.href,u.email
+     SELECT c.attempts,n.title,n.body,n.href,u.email,u.email_verified_at
      FROM claimed c
      JOIN notifications n ON n.id=c.notification_id
-     JOIN users u ON u.id=n.user_id
-     WHERE u.email_verified_at IS NOT NULL`,
+     JOIN users u ON u.id=n.user_id`,
     [id]
   );
   return result.rows[0] as undefined|{
@@ -38,6 +37,7 @@ async function claimDelivery(id:string){
     body:string|null;
     href:string|null;
     email:string;
+    email_verified_at:string|null;
   };
 }
 
@@ -54,6 +54,10 @@ async function markDeliveryFailure(id:string,error:unknown,terminal:boolean){
 export async function processNotificationDelivery(id:string){
   const delivery=await claimDelivery(id);
   if(!delivery)return {status:'skipped' as const};
+  if(!delivery.email_verified_at){
+    await pool.query(`UPDATE notification_deliveries SET status='failed',locked_at=NULL,last_error='Email address is not verified',updated_at=now() WHERE id=$1 AND status='sending'`,[id]);
+    return {status:'skipped' as const,reason:'email_unverified' as const};
+  }
   await sendOperationalNotification(delivery.email,delivery.title,delivery.body,delivery.href);
   await pool.query(
     `UPDATE notification_deliveries
