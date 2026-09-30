@@ -10,7 +10,7 @@ RBAC: viewers can read inventory, metrics and logs; operators can perform approv
 
 Realtime Docker/systemd log streams use one-time tickets and are forwarded in memory without log persistence. Browser terminal sessions also use one-time tickets, a dedicated `terminal.access` permission, PTYs, a 30-minute hard timeout, and start/stop audit records. Terminal contents are not stored.
 
-Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, backup/restore verification workflow, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
+Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, database/S3 backup targets, encrypted backup payloads, scheduled dispatch and restore workflow, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
 
 
 ## Health-check SSRF boundary
@@ -52,3 +52,12 @@ The agent does not receive filesystem paths, proxy snippets, or arbitrary reload
 Workspace secret values are encrypted before persistence with AES-256-GCM and a fresh random IV for every write. Ciphertext, IV, authentication tag, and key version are stored separately from secret metadata. Plaintext is never included in API responses, audit metadata, or application logs, and Fastify redaction includes request `body.value`.
 
 Only admins and owners can create, rotate, rename, or delete secrets; operators and viewers can inspect metadata but cannot retrieve values. Deletes require an explicit confirmation body and all writes are audited without recording secret contents. `CLOUDDECK_MASTER_KEY` must decode to exactly 32 bytes and must be injected from deployment secret storage. Production hardening still requires external KMS/Vault-backed key wrapping, version rotation, and key recovery procedures.
+
+
+## Local backup boundary
+
+Backup execution is not a generic archive or filesystem API. Directory jobs are accepted only when the resolved source stays within administrator-configured `CLOUDDECK_BACKUP_SOURCE_ROOTS`; symlinks and special files are rejected. Docker-volume jobs require a strict named volume, the local Docker driver, and a resolved mountpoint inside `CLOUDDECK_DOCKER_VOLUME_ROOT`.
+
+The API never chooses an Agent destination path. Archives are stored only in `CLOUDDECK_BACKUP_DIR` using a UUID-derived filename and mode 0600. Successful status requires a full post-write archive read plus SHA-256 metadata. Retention and deletion use the separate `backup.deleteLocal` action, which accepts only the UUID-derived storage key rather than arbitrary paths.
+
+Backup creation and deletion require `backup.manage` (admins/owners); viewers and operators receive metadata-only `backup.read`. This first slice does not yet claim database consistency, remote S3 durability, payload encryption, scheduled execution, or restore support.
