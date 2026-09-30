@@ -21,8 +21,8 @@ export async function authenticate(request: FastifyRequest) {
   } catch { throw Object.assign(new Error('Invalid or revoked session'), {statusCode: 401}); }
 }
 export const permissions = {
-  viewer: new Set(['server.read', 'metrics.read', 'audit.read', 'deployment.read', 'health.read']),
-  operator: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'terminal.access', 'deployment.read', 'deployment.manage', 'health.read', 'health.manage']),
+  viewer: new Set(['server.read', 'metrics.read', 'audit.read', 'deployment.read', 'health.read', 'alert.read']),
+  operator: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'terminal.access', 'deployment.read', 'deployment.manage', 'health.read', 'health.manage', 'alert.read', 'alert.manage']),
   admin: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage', 'terminal.access', 'deployment.read', 'deployment.manage', 'health.read', 'health.manage']),
   owner: new Set(['server.read', 'metrics.read', 'audit.read', 'server.action', 'server.create', 'member.manage', 'org.delete', 'terminal.access', 'deployment.read', 'deployment.manage', 'health.read', 'health.manage'])
 } as const;
