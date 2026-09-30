@@ -4,7 +4,7 @@ import {useEffect,useMemo,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {
   Activity,ArrowLeft,CheckCircle2,Clock3,Globe2,HeartPulse,Pause,Play,Plus,
-  RefreshCw,Server,Trash2,TriangleAlert,Wifi
+  RefreshCw,Trash2,TriangleAlert,Wifi
 } from 'lucide-react';
 import {api} from '@/lib/api';
 
