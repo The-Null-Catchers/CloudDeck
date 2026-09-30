@@ -6,6 +6,7 @@ import {authenticate,membership,audit,digest,randomToken} from './security.js';
 
 const uuid=z.uuid();
 const connectParams=z.object({orgId:uuid});
+const connectBody=z.object({returnTo:z.enum(['/dashboard','/deployments','/applications/new']).default('/dashboard')}).strict();
 const setupQuery=z.object({
   state:z.string().min(20).max(200),
   installation_id:z.coerce.number().int().positive(),
@@ -57,11 +58,11 @@ async function consumeState(token:string,phase:'install'|'oauth'){
     `UPDATE github_connection_states
      SET consumed_at=now()
      WHERE token_hash=$1 AND phase=$2 AND consumed_at IS NULL AND expires_at>now()
-     RETURNING organization_id,user_id,installation_id`,
+     RETURNING organization_id,user_id,installation_id,return_to`,
     [digest(token),phase]
   );
   if(!result.rowCount)throw Object.assign(new Error('Invalid or expired GitHub connection state'),{statusCode:401});
-  return result.rows[0] as {organization_id:string;user_id:string;installation_id:number|null};
+  return result.rows[0] as {organization_id:string;user_id:string;installation_id:number|null;return_to:'/dashboard'|'/deployments'|'/applications/new'};
 }
 
 async function exchangeUserToken(code:string){
@@ -209,13 +210,14 @@ export async function githubRoutes(app:FastifyInstance){
     const {userId}=await authenticate(request);
     const {orgId}=connectParams.parse(request.params);
     await membership(userId,orgId,'deployment.manage');
+    const {returnTo}=connectBody.parse(request.body??{});
     const {slug}=config();
     const state=randomToken();
     await pool.query('DELETE FROM github_connection_states WHERE expires_at<=now() OR consumed_at IS NOT NULL');
     await pool.query(
-      `INSERT INTO github_connection_states(token_hash,organization_id,user_id,phase,expires_at)
-       VALUES($1,$2,$3,'install',now()+interval '10 minutes')`,
-      [digest(state),orgId,userId]
+      `INSERT INTO github_connection_states(token_hash,organization_id,user_id,phase,return_to,expires_at)
+       VALUES($1,$2,$3,'install',$4,now()+interval '10 minutes')`,
+      [digest(state),orgId,userId,returnTo]
     );
     await audit(orgId,userId,'github.connection.started','organization',orgId,request.ip);
     return {url:githubInstallUrl(slug,state),expiresInSeconds:600};
@@ -226,9 +228,9 @@ export async function githubRoutes(app:FastifyInstance){
     const state=await consumeState(query.state,'install');
     const oauthState=randomToken();
     await pool.query(
-      `INSERT INTO github_connection_states(token_hash,organization_id,user_id,phase,installation_id,expires_at)
-       VALUES($1,$2,$3,'oauth',$4,now()+interval '10 minutes')`,
-      [digest(oauthState),state.organization_id,state.user_id,query.installation_id]
+      `INSERT INTO github_connection_states(token_hash,organization_id,user_id,phase,installation_id,return_to,expires_at)
+       VALUES($1,$2,$3,'oauth',$4,$5,now()+interval '10 minutes')`,
+      [digest(oauthState),state.organization_id,state.user_id,query.installation_id,state.return_to]
     );
     const {clientId,callback}=config();
     return reply.redirect(githubAuthorizeUrl(clientId,callback,oauthState));
@@ -264,7 +266,7 @@ export async function githubRoutes(app:FastifyInstance){
       return created.rows[0].id as string;
     });
     await audit(state.organization_id,state.user_id,'github.installation.connected','github_installation',linked,request.ip,{installationId:installation.id,account:installation.account.login});
-    const destination=new URL('/dashboard',process.env.APP_ORIGIN??'http://localhost:3000');
+    const destination=new URL(state.return_to,process.env.APP_ORIGIN??'http://localhost:3000');
     destination.searchParams.set('github','connected');
     return reply.redirect(destination.toString());
   });
