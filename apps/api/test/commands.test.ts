@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import type WebSocket from 'ws';
-import {attachAgent,detachAgent,resolveAgentResult,sendAgentCommand,containerId,registerAgentStream,resolveAgentStream,unregisterAgentStream} from '../src/commands.ts';
+import {attachAgent,detachAgent,resolveAgentResult,sendAgentCommand,containerId,registerAgentStream,resolveAgentStream,unregisterAgentStream,registerDeploymentLogHandler,resolveDeploymentLog,unregisterDeploymentLogHandler} from '../src/commands.ts';
 test('commands are scoped to the active agent and correlated by request ID',async()=>{
   const serverId=crypto.randomUUID();let sent='';
   const socket={readyState:1,send(value:string,done:(error?:Error)=>void){sent=value;done();}} as WebSocket;
@@ -30,4 +30,35 @@ test('stream messages route only to registered subscriptions',()=>{
   assert.equal(resolveAgentStream(serverId,{type:'stream.data',subscriptionId:crypto.randomUUID(),line:'ignored'}),false);
   unregisterAgentStream(serverId,subscriptionId);
   assert.equal(resolveAgentStream(serverId,{type:'stream.data',subscriptionId,line:'late'}),false);
+});
+
+
+test('deployment log envelopes are strict and routed by deployment ID',async()=>{
+  const deploymentId=crypto.randomUUID();
+  const received:string[]=[];
+  registerDeploymentLogHandler(deploymentId,message=>{received.push(message.line)});
+  assert.equal(resolveDeploymentLog({
+    type:'deployment.log',
+    deploymentId,
+    stage:'building',
+    stream:'build',
+    line:'Step 1/4'
+  }),true);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(received,['Step 1/4']);
+  assert.equal(resolveDeploymentLog({
+    type:'deployment.log',
+    deploymentId,
+    stage:'building',
+    stream:'build',
+    line:'x'.repeat(4001)
+  }),false);
+  unregisterDeploymentLogHandler(deploymentId);
+  assert.equal(resolveDeploymentLog({
+    type:'deployment.log',
+    deploymentId,
+    stage:'deploying',
+    stream:'system',
+    line:'late but valid'
+  }),true);
 });
