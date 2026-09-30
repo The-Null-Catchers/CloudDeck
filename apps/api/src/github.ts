@@ -7,6 +7,7 @@ import {authenticate,membership,audit,digest,randomToken} from './security.js';
 const uuid=z.uuid();
 const connectParams=z.object({orgId:uuid});
 const connectBody=z.object({returnTo:z.enum(['/dashboard','/deployments','/applications/new']).default('/dashboard')}).strict();
+export function parseGitHubConnectReturnTo(value:unknown){return connectBody.parse(value??{}).returnTo;}
 const setupQuery=z.object({
   state:z.string().min(20).max(200),
   installation_id:z.coerce.number().int().positive(),
@@ -210,7 +211,7 @@ export async function githubRoutes(app:FastifyInstance){
     const {userId}=await authenticate(request);
     const {orgId}=connectParams.parse(request.params);
     await membership(userId,orgId,'deployment.manage');
-    const {returnTo}=connectBody.parse(request.body??{});
+    const returnTo=parseGitHubConnectReturnTo(request.body);
     const {slug}=config();
     const state=randomToken();
     await pool.query('DELETE FROM github_connection_states WHERE expires_at<=now() OR consumed_at IS NOT NULL');
