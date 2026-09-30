@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import {pool,transaction} from './db.js';
+import {transaction} from './db.js';
 import {probeHealthTarget,type HealthKind,type HealthProbeResult} from './health-probe.js';
 
 type DueCheck={
