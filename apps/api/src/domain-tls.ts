@@ -8,6 +8,7 @@ const label=/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export function normalizeDomainHostname(input:string){
   const raw=input.trim().replace(/[.]$/,'').toLowerCase();
+  if(!raw||/[\\/:@?#\\s]/.test(raw))throw Object.assign(new Error('Invalid domain hostname'),{statusCode:400});
   const hostname=domainToASCII(raw).toLowerCase();
   if(!hostname||hostname.length>253||net.isIP(hostname))throw Object.assign(new Error('Domain must be a DNS hostname'),{statusCode:400});
   const labels=hostname.split('.');
@@ -94,5 +95,6 @@ export function certificateDaysRemaining(expiresAt:string|null,now=Date.now()){
   if(!expiresAt)return null;
   const timestamp=new Date(expiresAt).getTime();
   if(Number.isNaN(timestamp))return null;
-  return Math.ceil((timestamp-now)/86_400_000);
+  const days=Math.ceil((timestamp-now)/86_400_000);
+  return Object.is(days,-0)?0:days;
 }
