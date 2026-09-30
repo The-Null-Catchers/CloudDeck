@@ -225,16 +225,16 @@ func deployBuiltImage(ctx context.Context,p deploymentExecutePayload,imageRef st
   key:=strconv.Itoa(*p.Runtime.ContainerPort)+"/tcp";config["ExposedPorts"]=map[string]any{key:map[string]any{}}
   if p.Runtime.HostPort!=nil{config["HostConfig"].(map[string]any)["PortBindings"]=map[string]any{key:[]map[string]string{{"HostPort":strconv.Itoa(*p.Runtime.HostPort)}}}}
  }
- encoded,_:=json.Marshal(config);res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/create?name="+url.QueryEscape(name),strings.NewReader(string(encoded)));if err!=nil{rollbackContainer(ctx,client,"",oldID,name,oldRunning);return out,err}
- if res.StatusCode<200||res.StatusCode>=300{_ = expectDockerStatus(res,201);rollbackContainer(ctx,client,"",oldID,name,oldRunning);return out,errors.New("Docker container create failed")}
- var created struct{ID string `json:"Id"`};decodeErr:=json.NewDecoder(io.LimitReader(res.Body,64<<10)).Decode(&created);res.Body.Close();if decodeErr!=nil||created.ID==""{rollbackContainer(ctx,client,"",oldID,name,oldRunning);return out,errors.New("Invalid Docker create response")}
+ encoded,_:=json.Marshal(config);res,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/create?name="+url.QueryEscape(name),strings.NewReader(string(encoded)));if err!=nil{rollbackContainer(context.Background(),client,"",oldID,name,oldRunning);return out,err}
+ if res.StatusCode<200||res.StatusCode>=300{_ = expectDockerStatus(res,201);rollbackContainer(context.Background(),client,"",oldID,name,oldRunning);return out,errors.New("Docker container create failed")}
+ var created struct{ID string `json:"Id"`};decodeErr:=json.NewDecoder(io.LimitReader(res.Body,64<<10)).Decode(&created);res.Body.Close();if decodeErr!=nil||created.ID==""{rollbackContainer(context.Background(),client,"",oldID,name,oldRunning);return out,errors.New("Invalid Docker create response")}
  emitDeploymentLog(write,p.DeploymentID,"deploying","system","Created container "+created.ID[:12])
- start,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(created.ID)+"/start",nil);if err!=nil{rollbackContainer(ctx,client,created.ID,oldID,name,oldRunning);return out,err};if err:=expectDockerStatus(start,204,304);err!=nil{rollbackContainer(ctx,client,created.ID,oldID,name,oldRunning);return out,err}
+ start,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(created.ID)+"/start",nil);if err!=nil{rollbackContainer(context.Background(),client,created.ID,oldID,name,oldRunning);return out,err};if err:=expectDockerStatus(start,204,304);err!=nil{rollbackContainer(context.Background(),client,created.ID,oldID,name,oldRunning);return out,err}
  emitDeploymentLog(write,p.DeploymentID,"deploying","system","Container started; waiting for readiness")
  deadline:=time.Now().Add(30*time.Second)
  for {
-  _,running,healthy,err:=inspectNamedContainer(ctx,client,created.ID);if err!=nil{rollbackContainer(ctx,client,created.ID,oldID,name,oldRunning);return out,err}
-  if running&&healthy{break};if time.Now().After(deadline){emitContainerRuntimeLogs(write,p.DeploymentID,created.ID);rollbackContainer(ctx,client,created.ID,oldID,name,oldRunning);return out,errors.New("Container readiness check failed")}
+  _,running,healthy,err:=inspectNamedContainer(ctx,client,created.ID);if err!=nil{rollbackContainer(context.Background(),client,created.ID,oldID,name,oldRunning);return out,err}
+  if running&&healthy{break};if time.Now().After(deadline){emitContainerRuntimeLogs(write,p.DeploymentID,created.ID);rollbackContainer(context.Background(),client,created.ID,oldID,name,oldRunning);return out,errors.New("Container readiness check failed")}
   select{case <-ctx.Done():rollbackContainer(context.Background(),client,created.ID,oldID,name,oldRunning);return out,ctx.Err();case <-time.After(2*time.Second):}
  }
  emitDeploymentLog(write,p.DeploymentID,"health-checking","system","Container readiness verified")
