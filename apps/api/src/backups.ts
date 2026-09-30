@@ -157,7 +157,7 @@ export async function backupRoutes(app:FastifyInstance){
         try{
           await sendAgentCommand(job.server_id,'backup.deleteLocal',{storageKey:row.storage_key});
           await pool.query('DELETE FROM backups WHERE id=$1',[row.id]);
-        }catch{}
+        }catch(error){void error}
       }
       reply.code(201);
       return completed;
