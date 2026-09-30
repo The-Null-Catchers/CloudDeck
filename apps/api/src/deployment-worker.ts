@@ -42,7 +42,7 @@ async function deploymentSnapshot(deploymentId:string){
   const result=await pool.query(
     `SELECT d.id,d.state,d.commit_sha,d.repository_full_name,d.deployment_type,d.source_path,
             d.container_name,d.container_port,d.host_port,d.restart_policy,d.compose_project,
-            a.organization_id,a.server_id,g.installation_id
+            d.cancel_requested_at,a.organization_id,a.server_id,g.installation_id
      FROM deployments d
      JOIN applications a ON a.id=d.application_id
      LEFT JOIN github_installations g ON g.id=d.github_installation_id
@@ -64,6 +64,7 @@ async function deploymentSnapshot(deploymentId:string){
     organization_id:string;
     server_id:string|null;
     installation_id:string|number|null;
+    cancel_requested_at:string|null;
   };
 }
 
@@ -85,9 +86,14 @@ async function advanceTo(deploymentId:string,target:DeploymentProgressStage,mess
   }
 }
 
-async function failStartedDeployment(deploymentId:string,message:string){
-  const state=await currentState(deploymentId);
-  if(!state||state==='failed'||state==='successful'||state==='rolled-back')return;
+async function finishInterruptedDeployment(deploymentId:string,message:string){
+  const current=await pool.query('SELECT state,cancel_requested_at FROM deployments WHERE id=$1',[deploymentId]);
+  const state=current.rows[0]?.state as DeploymentState|undefined;
+  if(!state||state==='failed'||state==='successful'||state==='cancelled'||state==='rolled-back')return;
+  if(current.rows[0].cancel_requested_at&&canTransitionDeployment(state,'cancelled')){
+    await transitionDeployment(deploymentId,'cancelled',{message:'Deployment cancellation completed'});
+    return;
+  }
   if(canTransitionDeployment(state,'failed')){
     await transitionDeployment(deploymentId,'failed',{
       failureCode:'DEPLOYMENT_EXECUTION_FAILED',
@@ -100,6 +106,7 @@ export async function processDeploymentJob(deploymentId:string){
   const snapshot=await deploymentSnapshot(deploymentId);
   if(!snapshot)return {status:'missing' as const};
   if(snapshot.state!=='queued')return {status:'skipped' as const,state:snapshot.state};
+  if(snapshot.cancel_requested_at){await transitionDeployment(deploymentId,'cancelled',{message:'Deployment cancelled before execution'});return {status:'cancelled' as const};}
   if(!snapshot.server_id)throw new Error('Deployment target server is missing');
   if(!isAgentConnected(snapshot.server_id))throw Object.assign(new Error('Target agent is not connected'),{code:'AGENT_UNAVAILABLE'});
   if(!snapshot.installation_id||!snapshot.commit_sha||!snapshot.repository_full_name||!snapshot.deployment_type||!snapshot.source_path){
@@ -176,14 +183,20 @@ export async function processDeploymentJob(deploymentId:string){
     await advanceTo(deploymentId,'health-checking','Agent completed deployment readiness checks');
     const state=await currentState(deploymentId);
     if(state==='health-checking'){
-      await transitionDeployment(deploymentId,'successful',{message:successMessage});
+      const cancel=await pool.query('SELECT cancel_requested_at FROM deployments WHERE id=$1',[deploymentId]);
+      if(cancel.rows[0]?.cancel_requested_at){
+        await pool.query('UPDATE deployments SET cancel_requested_at=NULL,cancelled_by=NULL WHERE id=$1',[deploymentId]);
+        await transitionDeployment(deploymentId,'successful',{message:successMessage+'; cancellation arrived after activation completed'});
+      }else{
+        await transitionDeployment(deploymentId,'successful',{message:successMessage});
+      }
     }
     return {status:'successful' as const,...publicResult};
   }catch(error){
     await progressChain.catch(()=>{});
     await logChain.catch(()=>{});
     const message=error instanceof Error?error.message:'Deployment execution failed';
-    await failStartedDeployment(deploymentId,message);
+    await finishInterruptedDeployment(deploymentId,message);
     return {status:'failed' as const};
   }finally{
     unregisterDeploymentProgress(deploymentId);
