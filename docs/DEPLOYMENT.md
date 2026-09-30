@@ -258,3 +258,18 @@ The endpoint requires `deployment.manage`. Cancellation is durable and uses `can
 - If activation completed successfully before the cancellation reached the Agent, the deployment remains `successful`; CloudDeck clears the stale cancellation request and records that completion won the race.
 
 `cancelled` is terminal. It cannot be resumed or mutated into `successful`. A new deployment request must be created for another attempt.
+
+
+## Distributed execution leases
+
+CloudDeck serializes deployment execution per application, even when multiple API/worker replicas consume the same BullMQ queue.
+
+Before a queued job transitions to `cloning`, the worker must acquire a PostgreSQL lease keyed by `application_id`. The lease records the deployment UUID, an unguessable lease token, and an expiry timestamp.
+
+- Only one deployment for an application may hold the execution lease at a time.
+- A contending BullMQ job remains in database state `queued`; it is moved back to BullMQ's delayed set for 15 seconds using the worker lock token, so contention does not consume normal retry attempts.
+- The lease is renewed every 30 seconds and expires after 120 seconds if its owner disappears.
+- If renewal fails or the worker discovers that it no longer owns the lease, it requests targeted Agent cancellation for that deployment and will not report the execution as successful without re-verifying lease ownership.
+- The lease is deleted in a `finally` path after success, failure, or cancellation. A crashed worker cannot hold the application indefinitely because the lease expires.
+
+This lock is intentionally per application rather than global or per server: applications already have unique runtime targets on a server, so unrelated applications can continue deploying concurrently while the same container/Compose target cannot be raced by two deployments.
