@@ -22,7 +22,8 @@ export const allowedActions = [
   'systemd.tailLogs',
   'deployment.execute',
   'deployment.rollback',
-  'deployment.rollbackCompose'
+  'deployment.rollbackCompose',
+  'deployment.cancel'
 ] as const;
 export type AgentAction = typeof allowedActions[number];
 export interface ApiError { error: { code: string; message: string } }
