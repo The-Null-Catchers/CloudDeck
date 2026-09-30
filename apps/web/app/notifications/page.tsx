@@ -8,7 +8,7 @@ import {
 import {api} from '@/lib/api';
 
 type NotificationRow={
-  id:string;type:string;title:string;read_at:string|null;created_at:string;alert_id:string|null;
+  id:string;type:string;title:string;body:string|null;href:string|null;read_at:string|null;created_at:string;alert_id:string|null;
 };
 
 function when(value:string){return new Date(value).toLocaleString()}
@@ -79,18 +79,18 @@ export default function NotificationsPage(){
         </div>
 
         <div className="notification-list">
-          {visible.map(item=><article className={`notification-row ${item.read_at?'read':'unread'}`} key={item.id}>
+          {visible.map(item=>{const href=item.href?.startsWith('/')&&!item.href.startsWith('//')?item.href:null;return <article className={`notification-row ${item.read_at?'read':'unread'}`} key={item.id}>
             <span className="notification-icon">{iconFor(item.type)}</span>
             <div className="notification-copy">
               <div><strong>{item.title}</strong>{!item.read_at&&<span>NEW</span>}</div>
-              <p>{item.type.replaceAll('_',' ').replaceAll('.',' ')}</p>
+              <p>{item.body??item.type.replaceAll('_',' ').replaceAll('.',' ')}</p>
               <small><Clock3 size={12}/>{when(item.created_at)}</small>
             </div>
             <div className="notification-actions">
-              {item.alert_id&&<button onClick={()=>router.push('/alerts')}>Open alert</button>}
+              {(href||item.alert_id)&&<button onClick={()=>router.push(href??'/alerts')}>Open</button>}
               {!item.read_at&&<button className="primary" onClick={()=>void markRead(item.id)} disabled={busy===item.id}><Check size={14}/>{busy===item.id?'Saving…':'Mark read'}</button>}
             </div>
-          </article>)}
+          </article>})}
           {!visible.length&&!loading&&<div className="deployment-empty">No notifications here.</div>}
         </div>
       </section>

@@ -1,6 +1,6 @@
-import type pg from 'pg';
 import {transaction} from './db.js';
 import {probeHealthTarget,type HealthKind,type HealthProbeResult} from './health-probe.js';
+import {createOrganizationNotifications} from './notification-service.js';
 
 type DueCheck={
   id:string;
@@ -39,16 +39,6 @@ export async function claimDueHealthChecks(limit=20){
   });
 }
 
-async function notifyOrganization(orgId:string,alertId:string,type:string,title:string,db:Pick<pg.PoolClient,'query'>){
-  await db.query(
-    `INSERT INTO notifications(user_id,alert_id,type,title)
-     SELECT user_id,$2,$3,$4
-     FROM organization_members
-     WHERE organization_id=$1`,
-    [orgId,alertId,type,title]
-  );
-}
-
 export async function persistHealthResult(check:DueCheck,result:HealthProbeResult){
   return transaction(async db=>{
     await db.query(
@@ -75,7 +65,7 @@ export async function persistHealthResult(check:DueCheck,result:HealthProbeResul
         [check.id]
       );
       for(const row of resolved.rows){
-        await notifyOrganization(check.organization_id,row.id as string,'health_check_recovered',`Recovered: ${check.name}`,db);
+        await createOrganizationNotifications(check.organization_id,{alertId:row.id as string,type:'health_check_recovered',title:`Recovered: ${check.name}`,body:`${check.target} is responding normally again.`,href:'/alerts'},db);
       }
       return {failures,alertOpened:false,alertResolved:Boolean(resolved.rowCount)};
     }
@@ -89,7 +79,7 @@ export async function persistHealthResult(check:DueCheck,result:HealthProbeResul
         [check.organization_id,check.server_id,check.id]
       );
       if(opened.rowCount){
-        await notifyOrganization(check.organization_id,opened.rows[0].id as string,'health_check_failed',`Health check failed: ${check.name}`,db);
+        await createOrganizationNotifications(check.organization_id,{alertId:opened.rows[0].id as string,type:'health_check_failed',title:`Health check failed: ${check.name}`,body:result.error??`${check.target} failed its configured health check.`,href:'/alerts'},db);
       }
       return {failures,alertOpened:Boolean(opened.rowCount),alertResolved:false};
     }

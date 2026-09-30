@@ -23,6 +23,8 @@ import {alertRoutes} from './alerts.js';
 import {startHealthCheckRunner} from './health-runner.js';
 import {startDeploymentQueueReconciler,closeDeploymentQueue} from './deployment-queue.js';
 import {startDeploymentWorker,closeDeploymentWorker} from './deployment-worker.js';
+import {startNotificationQueueReconciler,closeNotificationQueue} from './notification-queue.js';
+import {startNotificationWorker,closeNotificationWorker} from './notification-worker.js';
 import './security.js';
 import { startOfflineSweep } from './offline.js';
 
@@ -68,10 +70,15 @@ if (process.env.NODE_ENV !== 'test') {
   const stopDeploymentQueueReconciler=startDeploymentQueueReconciler();
   startDeploymentWorker();
   const stopHealthCheckRunner=startHealthCheckRunner();
+  const stopNotificationQueueReconciler=startNotificationQueueReconciler();
+  startNotificationWorker();
   app.addHook('onClose',async()=>{
     stopSweep();
     stopDeploymentQueueReconciler();
     stopHealthCheckRunner();
+    stopNotificationQueueReconciler();
+    await closeNotificationWorker();
+    await closeNotificationQueue();
     await closeDeploymentWorker();
     await closeDeploymentQueue();
   });
