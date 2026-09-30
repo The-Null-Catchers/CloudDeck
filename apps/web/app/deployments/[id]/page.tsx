@@ -61,6 +61,7 @@ export default function DeploymentDetailPage(){
     let socket:WebSocket|null=null;
     let reconnect:ReturnType<typeof setTimeout>|null=null;
     let cursor=0;
+    let streamDone=false;
 
     const append=(row:DeploymentLogRow)=>{
       if(!active)return;
@@ -95,11 +96,11 @@ export default function DeploymentDetailPage(){
             line:event.line,
             createdAt:event.createdAt
           });
-          else if(event.type==='done')setLogStatus('complete');
+          else if(event.type==='done'){streamDone=true;setLogStatus('complete')}
         });
         socket.onclose=()=>{
           if(!active)return;
-          if(deployment&&terminalStates.has(deployment.state)){setLogStatus('complete');return}
+          if(streamDone){setLogStatus('complete');return}
           setLogStatus('connecting');
           reconnect=setTimeout(()=>void connect(),1500);
         };
