@@ -12,7 +12,7 @@ const databaseName=z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_.-]+$/,'
 const databaseSecret=z.object({
   host:z.string().trim().min(1).max(253).regex(/^[A-Za-z0-9_.:-]+$/,'Database host contains unsupported characters'),
   port:z.number().int().min(1).max(65535),
-  username:z.string().min(1).max(128).refine(value=>!\/\\s\/.test(value)&&[...value].every(character=>{const code=character.charCodeAt(0);return code>=32&&code!==127;}),'Database username contains unsupported characters'),
+  username:z.string().min(1).max(128).refine(value=>!/\s/.test(value)&&[...value].every(character=>{const code=character.charCodeAt(0);return code>=32&&code!==127;}),'Database username contains unsupported characters'),
   password:z.string().min(1).max(4096),
   sslMode:z.enum(['disable','require']).default('require')
 }).strict();
