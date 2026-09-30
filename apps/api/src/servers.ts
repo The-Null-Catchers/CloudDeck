@@ -69,7 +69,7 @@ export async function serverRoutes(app: FastifyInstance) {
     return {points:result.rows};
   });
   app.get('/notifications', async request => {
-    const {userId}=await authenticate(request);const result=await pool.query('SELECT id,type,title,read_at,created_at,alert_id FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100',[userId]);return {notifications:result.rows};
+    const {userId}=await authenticate(request);const result=await pool.query('SELECT id,type,title,body,href,read_at,created_at,alert_id FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100',[userId]);return {notifications:result.rows};
   });
   app.post('/notifications/:notificationId/read', async request => {
     const {userId}=await authenticate(request);const {notificationId}=z.object({notificationId:id}).parse(request.params);
