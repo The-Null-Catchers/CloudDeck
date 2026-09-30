@@ -16,6 +16,7 @@ import (
  "regexp"
  "strconv"
  "strings"
+ "sync"
  "time"
 )
 
@@ -43,6 +44,35 @@ type deploymentExecuteResult struct {
  ContainerID string `json:"containerId"`
  ImageRef string `json:"imageRef"`
  PreviousContainerID *string `json:"previousContainerId,omitempty"`
+}
+
+var deploymentExecutionsMu sync.Mutex
+var deploymentExecutions=map[string]context.CancelFunc{}
+
+func beginDeploymentExecution(parent context.Context,deploymentID string)(context.Context,func(),bool){
+ deploymentExecutionsMu.Lock()
+ defer deploymentExecutionsMu.Unlock()
+ if _,exists:=deploymentExecutions[deploymentID];exists{return parent,func(){},false}
+ ctx,cancel:=context.WithCancel(parent)
+ deploymentExecutions[deploymentID]=cancel
+ done:=func(){
+  deploymentExecutionsMu.Lock()
+  if current,ok:=deploymentExecutions[deploymentID];ok{
+   current()
+   delete(deploymentExecutions,deploymentID)
+  }
+  deploymentExecutionsMu.Unlock()
+ }
+ return ctx,done,true
+}
+
+func cancelDeploymentExecution(deploymentID string)bool{
+ deploymentExecutionsMu.Lock()
+ defer deploymentExecutionsMu.Unlock()
+ cancel,ok:=deploymentExecutions[deploymentID]
+ if !ok{return false}
+ cancel()
+ return true
 }
 
 func validateDeploymentPayload(p deploymentExecutePayload) error {
@@ -216,6 +246,8 @@ func executeDeploymentCommand(ctx context.Context,command agentCommand,write fun
  result:=commandResult{Type:"command.result",RequestID:command.RequestID}
  var p deploymentExecutePayload
  if command.Type!="command"||command.RequestID==""||decodeStrict(command.Payload,&p)!=nil||validateDeploymentPayload(p)!=nil{result.Error="Invalid deployment request";_ = write(result);return}
+ executionCtx,done,ok:=beginDeploymentExecution(ctx,p.DeploymentID);if !ok{result.Error="Deployment is already executing";_ = write(result);return}
+ defer done();ctx=executionCtx
  emitDeploymentProgress(write,p.DeploymentID,"cloning","Downloading pinned GitHub source")
  emitDeploymentLog(write,p.DeploymentID,"cloning","system","Downloading pinned commit "+p.CommitSHA[:12]+" from "+p.RepositoryFullName)
  root,err:=downloadDeploymentSource(ctx,p);if err!=nil{emitDeploymentLog(write,p.DeploymentID,"cloning","stderr",err.Error());result.Error=err.Error();_ = write(result);return};defer os.RemoveAll(root)
@@ -382,4 +414,17 @@ func executeComposeRollbackCommand(ctx context.Context,command agentCommand,writ
  if command.Type!="command"||command.RequestID==""||decodeStrict(command.Payload,&p)!=nil||validateComposeRollbackPayload(p)!=nil{result.Error="Invalid Compose rollback request";_ = write(result);return}
  rolledBack,err:=rollbackComposeProject(ctx,p);if err!=nil{result.Error=err.Error();_ = write(result);return}
  result.Success=true;result.Data=rolledBack;_ = write(result)
+}
+
+
+func executeDeploymentCancelCommand(command agentCommand,write func(any)error){
+ result:=commandResult{Type:"command.result",RequestID:command.RequestID}
+ var payload struct{DeploymentID string `json:"deploymentId"`}
+ if command.Type!="command"||command.RequestID==""||decodeStrict(command.Payload,&payload)!=nil||!deploymentUUID.MatchString(payload.DeploymentID){
+  result.Error="Invalid deployment cancellation request";_ = write(result);return
+ }
+ cancelled:=cancelDeploymentExecution(payload.DeploymentID)
+ result.Success=true
+ result.Data=map[string]bool{"cancelled":cancelled}
+ _=write(result)
 }
