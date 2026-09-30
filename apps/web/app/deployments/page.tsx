@@ -20,7 +20,7 @@ type Deployment={
   repository_full_name:string|null;deployment_type:'dockerfile'|'compose'|null;
 };
 
-const terminalStates=new Set(['successful','failed','rolled-back']);
+const terminalStates=new Set(['successful','failed','cancelled','rolled-back']);
 
 function shortSha(value:string|null){return value?value.slice(0,8):'pending'}
 function when(value:string){return new Date(value).toLocaleString()}
