@@ -18,6 +18,8 @@ import {deploymentLogRoutes} from './deployment-logs.js';
 import {githubRoutes} from './github.js';
 import {githubWebhookRoutes} from './github-webhook.js';
 import {applicationRoutes} from './applications.js';
+import {healthCheckRoutes} from './health-checks.js';
+import {startHealthCheckRunner} from './health-runner.js';
 import {startDeploymentQueueReconciler,closeDeploymentQueue} from './deployment-queue.js';
 import {startDeploymentWorker,closeDeploymentWorker} from './deployment-worker.js';
 import './security.js';
@@ -53,6 +55,7 @@ export function buildApp() {
   app.register(githubRoutes,{prefix:'/api/v1'});
   app.register(githubWebhookRoutes,{prefix:'/api/v1/webhooks'});
   app.register(applicationRoutes,{prefix:'/api/v1'});
+  app.register(healthCheckRoutes,{prefix:'/api/v1'});
   return app;
 }
 
@@ -62,9 +65,11 @@ if (process.env.NODE_ENV !== 'test') {
   const stopSweep=startOfflineSweep();
   const stopDeploymentQueueReconciler=startDeploymentQueueReconciler();
   startDeploymentWorker();
+  const stopHealthCheckRunner=startHealthCheckRunner();
   app.addHook('onClose',async()=>{
     stopSweep();
     stopDeploymentQueueReconciler();
+    stopHealthCheckRunner();
     await closeDeploymentWorker();
     await closeDeploymentQueue();
   });
