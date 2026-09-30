@@ -3,7 +3,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {
-  Activity,ArrowLeft,Bell,CheckCircle2,Clock3,HeartPulse,RefreshCw,Server,
+  Activity,ArrowLeft,Bell,CheckCircle2,Clock3,Globe2,HeartPulse,RefreshCw,Server,
   ShieldAlert,TriangleAlert
 } from 'lucide-react';
 import {api} from '@/lib/api';
@@ -11,9 +11,9 @@ import {api} from '@/lib/api';
 type Org={id:string;name:string;role:string};
 type AlertState='open'|'acknowledged'|'resolved';
 type Alert={
-  id:string;organization_id:string;server_id:string|null;health_check_id:string|null;kind:string;
+  id:string;organization_id:string;server_id:string|null;health_check_id:string|null;domain_id:string|null;kind:string;
   state:AlertState;created_at:string;resolved_at:string|null;health_check_name:string|null;
-  health_check_kind:string|null;health_check_target:string|null;server_name:string|null;
+  health_check_kind:string|null;health_check_target:string|null;domain_hostname:string|null;server_name:string|null;
 };
 
 function when(value:string|null){return value?new Date(value).toLocaleString():'—'}
@@ -90,17 +90,17 @@ export default function AlertsPage(){
 
         <div className="alert-list">
           {visible.map(alert=>{
-            const health=Boolean(alert.health_check_id);
+            const health=Boolean(alert.health_check_id);const domain=Boolean(alert.domain_id);
             return <article className={`alert-row ${alert.state}`} key={alert.id}>
-              <span className="alert-icon">{health?<HeartPulse size={18}/>:<Server size={18}/>}</span>
+              <span className="alert-icon">{health?<HeartPulse size={18}/>:domain?<Globe2 size={18}/>:<Server size={18}/>}</span>
               <div className="alert-copy">
-                <div><strong>{health?(alert.health_check_name??'Health check failed'):(alert.server_name??'Server alert')}</strong><span className={`health-state ${alert.state==='open'?'failing':alert.state}`}>{alert.state}</span></div>
-                <p>{health?(alert.health_check_target??label(alert.kind)):label(alert.kind)}</p>
+                <div><strong>{health?(alert.health_check_name??'Health check failed'):domain?(alert.domain_hostname??'Domain alert'):(alert.server_name??'Server alert')}</strong><span className={`health-state ${alert.state==='open'?'failing':alert.state}`}>{alert.state}</span></div>
+                <p>{health?(alert.health_check_target??label(alert.kind)):domain?label(alert.kind):label(alert.kind)}</p>
                 <small><Clock3 size={12}/> Opened {when(alert.created_at)}{alert.resolved_at?` · Resolved ${when(alert.resolved_at)}`:''}</small>
               </div>
               <div className="alert-actions">
                 {alert.state==='open'&&<button className="primary" onClick={()=>void acknowledge(alert)} disabled={busy===alert.id}>{busy===alert.id?'Acknowledging…':'Acknowledge'}</button>}
-                {health&&<button onClick={()=>router.push('/health-checks')}>View check</button>}
+                {health&&<button onClick={()=>router.push('/health-checks')}>View check</button>}{domain&&<button onClick={()=>router.push('/domains')}>View domain</button>}
               </div>
             </article>
           })}
