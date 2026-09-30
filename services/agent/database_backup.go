@@ -45,6 +45,22 @@ func databaseTool(envName,defaultPath string)(string,error){
  return path,nil
 }
 
+func writeCredentialFile(path,content string)error{
+ return os.WriteFile(path,[]byte(content),0600)
+}
+
+func pgpassEscape(value string)string{
+ value=strings.ReplaceAll(value,"\\","\\\\")
+ return strings.ReplaceAll(value,":","\\:")
+}
+
+func mysqlOptionEscape(value string)string{
+ value=strings.ReplaceAll(value,"\\","\\\\")
+ value=strings.ReplaceAll(value,"\"","\\\"")
+ value=strings.ReplaceAll(value,"\n","\\n")
+ return strings.ReplaceAll(value,"\r","\\r")
+}
+
 func commandEnvironment(extra ...string)[]string{
  env:=os.Environ()
  for _,entry:=range extra{
@@ -70,6 +86,9 @@ func createDatabaseDump(ctx context.Context,kind,databaseName string,config *dat
  if kind=="postgres"{
   binary,toolErr:=databaseTool("CLOUDDECK_PG_DUMP_BIN","/usr/bin/pg_dump")
   if toolErr!=nil{_ = file.Close();cleanup();return "",func(){},toolErr}
+  pgpassPath:=filepath.Join(tempDir,".pgpass")
+  pgpass:=strings.Join([]string{pgpassEscape(config.Host),strconv.Itoa(config.Port),pgpassEscape(databaseName),pgpassEscape(config.Username),pgpassEscape(config.Password)},":")+"\n"
+  if err:=writeCredentialFile(pgpassPath,pgpass);err!=nil{_ = file.Close();cleanup();return "",func(){},errors.New("unable to prepare PostgreSQL credentials")}
   command=exec.CommandContext(ctx,binary,
    "--host",config.Host,
    "--port",strconv.Itoa(config.Port),
@@ -79,13 +98,17 @@ func createDatabaseDump(ctx context.Context,kind,databaseName string,config *dat
    "--no-owner",
    "--no-privileges",
   )
-  command.Env=commandEnvironment("PGPASSWORD="+config.Password,"PGSSLMODE="+config.SSLMode)
+  command.Env=commandEnvironment("PGPASSFILE="+pgpassPath,"PGSSLMODE="+config.SSLMode)
  }else{
   binary,toolErr:=databaseTool("CLOUDDECK_MYSQLDUMP_BIN","/usr/bin/mysqldump")
   if toolErr!=nil{_ = file.Close();cleanup();return "",func(){},toolErr}
   sslArg:="--ssl-mode=REQUIRED"
   if config.SSLMode=="disable"{sslArg="--ssl-mode=DISABLED"}
+  defaultsPath:=filepath.Join(tempDir,"mysql.cnf")
+  defaults:="[client]\npassword=\""+mysqlOptionEscape(config.Password)+"\"\n"
+  if err:=writeCredentialFile(defaultsPath,defaults);err!=nil{_ = file.Close();cleanup();return "",func(){},errors.New("unable to prepare MySQL credentials")}
   command=exec.CommandContext(ctx,binary,
+   "--defaults-extra-file="+defaultsPath,
    "--host="+config.Host,
    "--port="+strconv.Itoa(config.Port),
    "--user="+config.Username,
@@ -96,7 +119,7 @@ func createDatabaseDump(ctx context.Context,kind,databaseName string,config *dat
    "--hex-blob",
    "--databases",databaseName,
   )
-  command.Env=commandEnvironment("MYSQL_PWD="+config.Password)
+  command.Env=commandEnvironment()
  }
  command.Stdout=limited
  command.Stderr=io.Discard
