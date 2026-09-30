@@ -10,7 +10,7 @@ RBAC: viewers can read inventory, metrics and logs; operators can perform approv
 
 Realtime Docker/systemd log streams use one-time tickets and are forwarded in memory without log persistence. Browser terminal sessions also use one-time tickets, a dedicated `terminal.access` permission, PTYs, a 30-minute hard timeout, and start/stop audit records. Terminal contents are not stored.
 
-Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, comprehensive alert delivery, encrypted secret key management, backup/restore verification workflow, deployments, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
+Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, encrypted secret key management, backup/restore verification workflow, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
 
 
 ## Health-check SSRF boundary
@@ -29,3 +29,10 @@ The central probe runner:
 - bounds timeout, interval, target length, and stored error length.
 
 This means central health checks cannot intentionally reach localhost, cloud metadata endpoints such as link-local addresses, or RFC1918/ULA networks. Private infrastructure monitoring should be performed through a future typed Agent health-check action.
+
+
+## Notification email boundary
+
+Operational email is asynchronous. Alert transactions store in-app notifications and durable email-delivery records, then BullMQ workers perform SMTP I/O outside the alert transaction. Queue jobs contain only a delivery identifier rather than recipient addresses or message bodies.
+
+Only users with a verified email address receive email-delivery rows. Notification links are restricted to single-slash internal paths before they are combined with `APP_ORIGIN`; protocol-relative or external destinations are ignored. Titles have CR/LF removed before being used as mail subjects. SMTP errors are bounded before persistence and retried without logging credentials, access tokens, or message secrets.
