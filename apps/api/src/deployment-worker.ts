@@ -8,6 +8,8 @@ import {
   isAgentConnected,
   registerDeploymentProgress,
   unregisterDeploymentProgress,
+  registerDeploymentLogHandler,
+  unregisterDeploymentLogHandler,
   sendAgentCommand,
   type DeploymentProgressStage
 } from './commands.js';
@@ -108,9 +110,20 @@ export async function processDeploymentJob(deploymentId:string){
   const token=await createInstallationToken(Number(snapshot.installation_id));
   await transitionDeployment(deploymentId,'cloning',{message:'Deployment worker claimed the queued request'});
   let progressChain=Promise.resolve();
+  let logChain=Promise.resolve();
   registerDeploymentProgress(deploymentId,progress=>{
     progressChain=progressChain.then(()=>advanceTo(deploymentId,progress.stage,progress.message));
     return progressChain;
+  });
+  registerDeploymentLogHandler(deploymentId,entry=>{
+    logChain=logChain.then(async()=>{
+      await pool.query(
+        `INSERT INTO deployment_logs(deployment_id,stage,stream,line)
+         VALUES($1,$2,$3,$4)`,
+        [deploymentId,entry.stage,entry.stream,entry.line]
+      );
+    });
+    return logChain;
   });
 
   try{
@@ -136,6 +149,7 @@ export async function processDeploymentJob(deploymentId:string){
       25*60_000
     );
     await progressChain;
+    await logChain;
     let successMessage:string;
     let publicResult:object;
     if(snapshot.deployment_type==='compose'){
@@ -167,11 +181,13 @@ export async function processDeploymentJob(deploymentId:string){
     return {status:'successful' as const,...publicResult};
   }catch(error){
     await progressChain.catch(()=>{});
+    await logChain.catch(()=>{});
     const message=error instanceof Error?error.message:'Deployment execution failed';
     await failStartedDeployment(deploymentId,message);
     return {status:'failed' as const};
   }finally{
     unregisterDeploymentProgress(deploymentId);
+    unregisterDeploymentLogHandler(deploymentId);
   }
 }
 

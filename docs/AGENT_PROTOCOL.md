@@ -122,3 +122,22 @@ Services are dependency-sorted, images are pulled or built through the Docker En
 `deployment.rollbackCompose` accepts only a deployment UUID, strict Compose project name, and bounded current/previous service-to-container maps. Service names and Docker IDs are validated; arbitrary Docker arguments are not accepted.
 
 The Agent verifies the active project identity before mutation, restores all previous service containers, checks readiness per service, and attempts to recover the current project if any step fails. The API does not mark the deployment rolled back until this command completes successfully.
+
+
+### Deployment log envelopes
+
+During `deployment.execute`, the Agent may emit:
+
+```json
+{
+  "type": "deployment.log",
+  "deploymentId": "<uuid>",
+  "stage": "building",
+  "stream": "build",
+  "line": "Step 4/8 : RUN npm ci"
+}
+```
+
+Allowed stages are `cloning`, `building`, `deploying`, and `health-checking`. Allowed streams are `system`, `build`, `stdout`, and `stderr`. Empty lines and control characters are discarded; each line is capped at 4,000 characters before transmission.
+
+Dockerfile and Compose builds forward bounded Docker Engine build/pull status output. After a newly created container reaches readiness, the Agent forwards a bounded tail of container runtime logs. These envelopes never include the GitHub installation token, which is used only for the source archive request.

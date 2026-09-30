@@ -14,6 +14,7 @@ import {logRoutes} from './logs.js';
 import {streamRoutes} from './streams.js';
 import {terminalRoutes} from './terminal.js';
 import {deploymentRoutes} from './deployments.js';
+import {deploymentLogRoutes} from './deployment-logs.js';
 import {githubRoutes} from './github.js';
 import {githubWebhookRoutes} from './github-webhook.js';
 import {applicationRoutes} from './applications.js';
@@ -48,6 +49,7 @@ export function buildApp() {
   app.register(streamRoutes,{prefix:'/api/v1'});
   app.register(terminalRoutes,{prefix:'/api/v1'});
   app.register(deploymentRoutes,{prefix:'/api/v1'});
+  app.register(deploymentLogRoutes,{prefix:'/api/v1'});
   app.register(githubRoutes,{prefix:'/api/v1'});
   app.register(githubWebhookRoutes,{prefix:'/api/v1/webhooks'});
   app.register(applicationRoutes,{prefix:'/api/v1'});

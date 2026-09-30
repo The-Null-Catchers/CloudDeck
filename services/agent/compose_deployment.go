@@ -131,17 +131,23 @@ func ensureComposeNetwork(ctx context.Context,client *http.Client,project string
  return expectDockerStatus(res,http.StatusCreated)
 }
 
-func pullComposeImage(ctx context.Context,client *http.Client,image string)error{
+func pullComposeImage(ctx context.Context,client *http.Client,deploymentID,service,image string,write func(any)error)error{
  if image==""||strings.ContainsAny(image,"\r\n\x00"){return errors.New("Invalid image reference")}
  q:=url.Values{};q.Set("fromImage",image)
  res,err:=dockerJSON(ctx,client,http.MethodPost,"/images/create?"+q.Encode(),nil);if err!=nil{return err}
  defer res.Body.Close();if res.StatusCode<200||res.StatusCode>=300{return fmt.Errorf("Docker image pull returned HTTP %d",res.StatusCode)}
- _,err=io.Copy(io.Discard,io.LimitReader(res.Body,32<<20));return err
+ dec:=json.NewDecoder(io.LimitReader(res.Body,32<<20))
+ for{
+  var msg struct{Status string `json:"status"`;ID string `json:"id"`;Progress string `json:"progress"`;Error string `json:"error"`}
+  err:=dec.Decode(&msg);if errors.Is(err,io.EOF){break};if err!=nil{return errors.New("Invalid Docker image pull response")}
+  if msg.Status!=""{line:=service+": "+msg.Status;if msg.ID!=""{line+=" "+msg.ID};if msg.Progress!=""{line+=" "+msg.Progress};emitDeploymentLog(write,deploymentID,"building","build",line)}
+  if msg.Error!=""{emitDeploymentLog(write,deploymentID,"building","stderr",service+": "+msg.Error);return errors.New("Docker image pull failed")}
+ }
+ return nil
 }
 
-func buildComposeServiceImage(ctx context.Context,root,project,deploymentID,service,buildPath string)(string,error){
+func buildComposeServiceImage(ctx context.Context,root,project,deploymentID,service,buildPath string,write func(any)error)(string,error){
  contextRoot:=filepath.Join(root,filepath.Clean(buildPath));info,err:=os.Stat(contextRoot);if err!=nil||!info.IsDir(){return "",fmt.Errorf("Build context for %s is missing",service)}
- p:=deploymentExecutePayload{DeploymentID:deploymentID,CommitSHA:strings.Repeat("0",40),SourcePath:"Dockerfile"}
  imageRef:="clouddeck/"+strings.ToLower(project)+"-"+strings.ToLower(service)+":"+strings.ToLower(deploymentID[:8])
  client,err:=deploymentHTTPClient(20*time.Minute);if err!=nil{return "",err}
  pr,pw:=io.Pipe();go func(){err:=writeBuildContext(ctx,contextRoot,pw);_ = pw.CloseWithError(err)}()
@@ -149,8 +155,14 @@ func buildComposeServiceImage(ctx context.Context,root,project,deploymentID,serv
  req,err:=http.NewRequestWithContext(ctx,http.MethodPost,"http://docker/build?"+q.Encode(),pr);if err!=nil{return "",err};req.Header.Set("Content-Type","application/x-tar")
  res,err:=client.Do(req);if err!=nil{return "",errors.New("Docker Compose service build request failed")}
  defer res.Body.Close();if res.StatusCode<200||res.StatusCode>=300{return "",fmt.Errorf("Docker build returned HTTP %d",res.StatusCode)}
- dec:=json.NewDecoder(io.LimitReader(res.Body,32<<20));for{var msg struct{Error string `json:"error"`};err:=dec.Decode(&msg);if errors.Is(err,io.EOF){break};if err!=nil{return "",errors.New("Invalid Docker build response")};if msg.Error!=""{return "",errors.New("Docker Compose service build failed")}}
- _=p
+ dec:=json.NewDecoder(io.LimitReader(res.Body,32<<20))
+ for{
+  var msg struct{Stream string `json:"stream"`;Status string `json:"status"`;Progress string `json:"progress"`;Error string `json:"error"`}
+  err:=dec.Decode(&msg);if errors.Is(err,io.EOF){break};if err!=nil{return "",errors.New("Invalid Docker build response")}
+  if msg.Stream!=""{for _,line:=range strings.Split(msg.Stream,"\n"){emitDeploymentLog(write,deploymentID,"building","build",service+": "+line)}}
+  if msg.Status!=""{line:=service+": "+msg.Status;if msg.Progress!=""{line+=" "+msg.Progress};emitDeploymentLog(write,deploymentID,"building","build",line)}
+  if msg.Error!=""{emitDeploymentLog(write,deploymentID,"building","stderr",service+": "+msg.Error);return "",errors.New("Docker Compose service build failed")}
+ }
  return imageRef,nil
 }
 
@@ -177,7 +189,8 @@ func deployComposeProject(ctx context.Context,root string,p deploymentExecutePay
  emitDeploymentProgress(write,p.DeploymentID,"building","Preparing Compose service images")
  for _,name:=range order{
   svc:=spec.Services[name]
-  if svc.Build!=""{images[name],err=buildComposeServiceImage(ctx,root,project,p.DeploymentID,name,svc.Build)}else{images[name]=svc.Image;err=pullComposeImage(ctx,client,svc.Image)}
+  emitDeploymentLog(write,p.DeploymentID,"building","system","Preparing Compose service "+name)
+  if svc.Build!=""{images[name],err=buildComposeServiceImage(ctx,root,project,p.DeploymentID,name,svc.Build,write)}else{images[name]=svc.Image;err=pullComposeImage(ctx,client,p.DeploymentID,name,svc.Image,write)}
   if err!=nil{return result,fmt.Errorf("Compose service %s image preparation failed",name)}
  }
  previous,err:=existingComposeContainers(project);if err!=nil{return result,err}
@@ -216,8 +229,12 @@ func deployComposeProject(ctx context.Context,root string,p deploymentExecutePay
   if res.StatusCode<200||res.StatusCode>=300{res.Body.Close();restore();return result,fmt.Errorf("Compose service %s create failed",name)}
   var createdRes struct{ID string `json:"Id"`};decodeErr:=json.NewDecoder(io.LimitReader(res.Body,64<<10)).Decode(&createdRes);res.Body.Close();if decodeErr!=nil||createdRes.ID==""{restore();return result,errors.New("Invalid Docker create response")}
   created[name]=createdRes.ID
+  emitDeploymentLog(write,p.DeploymentID,"deploying","system","Created Compose service "+name+" as "+createdRes.ID[:12])
   start,err:=dockerJSON(ctx,client,http.MethodPost,"/containers/"+url.PathEscape(createdRes.ID)+"/start",nil);if err!=nil{restore();return result,err};if err:=expectDockerStatus(start,204,304);err!=nil{restore();return result,err}
-  if err:=waitContainerReady(ctx,client,createdRes.ID,45*time.Second);err!=nil{restore();return result,fmt.Errorf("Compose service %s readiness failed",name)}
+  emitDeploymentLog(write,p.DeploymentID,"deploying","system","Started Compose service "+name+"; waiting for readiness")
+  if err:=waitContainerReady(ctx,client,createdRes.ID,45*time.Second);err!=nil{emitContainerRuntimeLogs(write,p.DeploymentID,createdRes.ID);restore();return result,fmt.Errorf("Compose service %s readiness failed",name)}
+  emitDeploymentLog(write,p.DeploymentID,"health-checking","system","Compose service "+name+" is ready")
+  emitContainerRuntimeLogs(write,p.DeploymentID,createdRes.ID)
  }
  emitDeploymentProgress(write,p.DeploymentID,"health-checking","All Compose services are running and ready")
  result.ComposeContainerIDs=created;result.PreviousComposeContainerIDs=previous;return result,nil

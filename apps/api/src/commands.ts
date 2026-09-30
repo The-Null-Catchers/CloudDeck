@@ -99,3 +99,36 @@ export function resolveDeploymentProgress(message:unknown):boolean{
   void Promise.resolve(handler(parsed.data)).catch(()=>{});
   return true;
 }
+
+
+export type DeploymentLogStage='cloning'|'building'|'deploying'|'health-checking';
+export type DeploymentLogStream='system'|'build'|'stdout'|'stderr';
+type DeploymentLogMessage={
+  deploymentId:string;
+  stage:DeploymentLogStage;
+  stream:DeploymentLogStream;
+  line:string;
+};
+type DeploymentLogHandler=(message:DeploymentLogMessage)=>void|Promise<void>;
+const deploymentLogHandlers=new Map<string,DeploymentLogHandler>();
+
+export function registerDeploymentLogHandler(deploymentId:string,handler:DeploymentLogHandler){
+  if(deploymentLogHandlers.has(deploymentId))throw new Error('Deployment log handler already registered');
+  deploymentLogHandlers.set(deploymentId,handler);
+}
+export function unregisterDeploymentLogHandler(deploymentId:string){
+  deploymentLogHandlers.delete(deploymentId);
+}
+export function resolveDeploymentLog(message:unknown):boolean{
+  const parsed=z.object({
+    type:z.literal('deployment.log'),
+    deploymentId:z.uuid(),
+    stage:z.enum(['cloning','building','deploying','health-checking']),
+    stream:z.enum(['system','build','stdout','stderr']),
+    line:z.string().min(1).max(4000)
+  }).strict().safeParse(message);
+  if(!parsed.success)return false;
+  const handler=deploymentLogHandlers.get(parsed.data.deploymentId);
+  if(handler)void Promise.resolve(handler(parsed.data)).catch(()=>{});
+  return true;
+}

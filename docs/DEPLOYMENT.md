@@ -215,3 +215,21 @@ For signed `push` events CloudDeck matches applications by GitHub App installati
 Webhook delivery IDs and per-application idempotency keys make GitHub retries safe. Re-delivering the same push cannot create duplicate deployments. Non-push events, branch deletions, and unmatched branches are acknowledged without deployment. Source validation failures that indicate an invalid pushed source are audited as skipped auto-deploys; transient upstream failures are allowed to fail the webhook so GitHub can retry.
 
 The BullMQ job still contains only the deployment UUID. GitHub credentials remain short-lived and are minted later by the deployment worker.
+
+
+## Durable deployment logs
+
+Deployment execution now emits structured log envelopes in addition to state transitions. CloudDeck persists these lines in PostgreSQL so build/runtime output remains available after page refreshes, reconnects, API restarts, or after the deployment has completed.
+
+Each persisted line is scoped to one deployment and includes:
+
+- deployment stage: `cloning`, `building`, `deploying`, or `health-checking`
+- stream: `system`, `build`, `stdout`, or `stderr`
+- bounded line content (maximum 4,000 characters)
+- server timestamp
+
+The web UI loads durable history, then requests a short-lived one-time stream ticket. Tickets are stored only as SHA-256 hashes in PostgreSQL and are atomically consumed by the WebSocket endpoint. The live stream resumes from the last numeric log ID, so reconnects do not require replaying the whole deployment.
+
+Build output comes from Docker Engine build/pull JSON streams. Runtime output is captured from the newly started container(s) during readiness. Application stdout/stderr may contain sensitive application data, so deployment log access requires `deployment.read` within the owning workspace.
+
+BullMQ jobs continue to contain only the deployment UUID. GitHub installation credentials are never persisted into deployment logs.
