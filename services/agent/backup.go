@@ -20,7 +20,52 @@ import (
 )
 
 var backupIDPattern=regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
-var backupVolumeName=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$`)
+var backupVolumeName=regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}package main
+
+import (
+ "archive/tar"
+ "compress/gzip"
+ "context"
+ "crypto/sha256"
+ "encoding/hex"
+ "encoding/json"
+ "errors"
+ "fmt"
+ "io"
+ "net/http"
+ "net/url"
+ "os"
+ "path/filepath"
+ "regexp"
+ "strconv"
+ "strings"
+)
+
+var backupIDPattern=regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
+)
+var backupStorageKey=regexp.MustCompile(`^[0-9a-fA-F-]{36}\\.tar\\.gzpackage main
+
+import (
+ "archive/tar"
+ "compress/gzip"
+ "context"
+ "crypto/sha256"
+ "encoding/hex"
+ "encoding/json"
+ "errors"
+ "fmt"
+ "io"
+ "net/http"
+ "net/url"
+ "os"
+ "path/filepath"
+ "regexp"
+ "strconv"
+ "strings"
+)
+
+var backupIDPattern=regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
+)
 
 type backupExecutePayload struct {
  BackupID string `json:"backupId"`
@@ -207,6 +252,19 @@ func executeLocalBackup(ctx context.Context,payload backupExecutePayload)(backup
   Verified:true,
   EntryCount:verifiedEntries,
  },nil
+}
+
+func deleteLocalBackup(storageKey string)error{
+ if !backupStorageKey.MatchString(storageKey){return errors.New("invalid backup storage key")}
+ targetRoot:=strings.TrimSpace(os.Getenv("CLOUDDECK_BACKUP_DIR"))
+ if targetRoot==""{targetRoot="/var/lib/clouddeck-agent/backups"}
+ if !filepath.IsAbs(targetRoot){return errors.New("backup target directory must be absolute")}
+ root,err:=filepath.EvalSymlinks(filepath.Clean(targetRoot))
+ if err!=nil{return errors.New("unable to resolve backup target directory")}
+ path:=filepath.Join(root,storageKey)
+ if !pathInside(root,path){return errors.New("backup storage key escaped target directory")}
+ if err:=os.Remove(path);err!=nil && !errors.Is(err,os.ErrNotExist){return errors.New("unable to remove backup archive")}
+ return nil
 }
 
 func executeBackupCommand(ctx context.Context,command agentCommand,write func(any)error){
