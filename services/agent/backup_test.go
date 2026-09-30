@@ -80,7 +80,7 @@ func TestPostgresBackupUsesEnvironmentPasswordAndVerifiesDump(t *testing.T){
  tools:=t.TempDir()
  pgDump:=filepath.Join(tools,"pg_dump")
  pgRestore:=filepath.Join(tools,"pg_restore")
- dumpScript:="#!/bin/sh\ncase \"$*\" in *super-secret*) exit 41;; esac\n[ \"$PGPASSWORD\" = \"super-secret\" ] || exit 42\nprintf 'PGDMP-fake-content'\n"
+ dumpScript:="#!/bin/sh\ncase \"$*\" in *super-secret*) exit 41;; esac\n[ -f \"$PGPASSFILE\" ] || exit 42\ngrep -q 'super-secret' \"$PGPASSFILE\" || exit 43\nprintf 'PGDMP-fake-content'\n"
  restoreScript:="#!/bin/sh\n[ \"$1\" = \"--list\" ] || exit 43\n[ -s \"$2\" ] || exit 44\nexit 0\n"
  if err:=os.WriteFile(pgDump,[]byte(dumpScript),0700);err!=nil{t.Fatal(err)}
  if err:=os.WriteFile(pgRestore,[]byte(restoreScript),0700);err!=nil{t.Fatal(err)}
