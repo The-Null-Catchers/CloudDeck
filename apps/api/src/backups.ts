@@ -3,6 +3,7 @@ import {z} from 'zod';
 import {pool,transaction} from './db.js';
 import {authenticate,membership,audit} from './security.js';
 import {sendAgentCommand} from './commands.js';
+import {readSecretValueForService} from './secrets.js';
 
 const uuid=z.uuid();
 const volumeName=z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
@@ -21,6 +22,14 @@ const createBody=z.discriminatedUnion('kind',[
     kind:z.literal('docker_volume'),
     source:volumeName,
     retentionCount:z.number().int().min(1).max(100).default(7)
+  }).strict(),
+  z.object({
+    name:z.string().trim().min(1).max(120),
+    serverId:uuid,
+    kind:z.enum(['postgres','mysql']),
+    source:databaseName,
+    sourceSecretId:uuid,
+    retentionCount:z.number().int().min(1).max(100).default(7)
   }).strict()
 ]);
 const runResult=z.object({
@@ -33,7 +42,7 @@ const runResult=z.object({
 
 async function backupJob(jobId:string){
   const result=await pool.query(
-    `SELECT b.id,b.organization_id,b.server_id,b.name,b.kind,b.source,b.schedule,b.retention_count,b.target_type,b.enabled,
+    `SELECT b.id,b.organization_id,b.server_id,b.name,b.kind,b.source,b.source_secret_id,b.schedule,b.retention_count,b.target_type,b.enabled,
             b.created_by,b.created_at,b.updated_at,s.name AS server_name,s.status AS server_status
      FROM backup_jobs b JOIN servers s ON s.id=b.server_id
      WHERE b.id=$1`,
@@ -49,7 +58,7 @@ export async function backupRoutes(app:FastifyInstance){
     const {orgId}=z.object({orgId:uuid}).parse(request.params);
     await membership(userId,orgId,'backup.read');
     const jobs=await pool.query(
-      `SELECT b.id,b.organization_id,b.server_id,b.name,b.kind,b.source,b.schedule,b.retention_count,b.target_type,b.enabled,
+      `SELECT b.id,b.organization_id,b.server_id,b.name,b.kind,b.source,b.source_secret_id,b.schedule,b.retention_count,b.target_type,b.enabled,
               b.created_by,b.created_at,b.updated_at,s.name AS server_name,s.status AS server_status,
               latest.id AS latest_backup_id,latest.status AS latest_backup_status,latest.size_bytes AS latest_backup_size,
               latest.verified_at AS latest_verified_at,latest.created_at AS latest_backup_created_at
@@ -86,12 +95,21 @@ export async function backupRoutes(app:FastifyInstance){
     await membership(userId,orgId,'backup.manage');
     const server=await pool.query('SELECT id FROM servers WHERE id=$1 AND organization_id=$2',[body.serverId,orgId]);
     if(!server.rowCount)throw Object.assign(new Error('Server not found in this workspace'),{statusCode:404});
+    let sourceSecretId:string|null=null;
+    if(body.kind==='postgres'||body.kind==='mysql'){
+      const secret=await pool.query(
+        'SELECT id FROM secrets WHERE id=$1 AND organization_id=$2 AND kind=$3',
+        [body.sourceSecretId,orgId,'backup']
+      );
+      if(!secret.rowCount)throw Object.assign(new Error('Backup source secret not found in this workspace'),{statusCode:404});
+      sourceSecretId=body.sourceSecretId;
+    }
     const created=await transaction(async db=>{
       const result=await db.query(
-        `INSERT INTO backup_jobs(organization_id,server_id,name,kind,source,schedule,retention_count,target_type,enabled,created_by)
-         VALUES($1,$2,$3,$4,$5,'manual',$6,'local',true,$7)
-         RETURNING id,organization_id,server_id,name,kind,source,schedule,retention_count,target_type,enabled,created_by,created_at,updated_at`,
-        [orgId,body.serverId,body.name,body.kind,body.source,body.retentionCount,userId]
+        `INSERT INTO backup_jobs(organization_id,server_id,name,kind,source,source_secret_id,schedule,retention_count,target_type,enabled,created_by)
+         VALUES($1,$2,$3,$4,$5,$6,'manual',$7,'local',true,$8)
+         RETURNING id,organization_id,server_id,name,kind,source,source_secret_id,schedule,retention_count,target_type,enabled,created_by,created_at,updated_at`,
+        [orgId,body.serverId,body.name,body.kind,body.source,sourceSecretId,body.retentionCount,userId]
       );
       await audit(orgId,userId,'backup.job.create','backup_job',result.rows[0].id,request.ip,{
         kind:body.kind,serverId:body.serverId,retentionCount:body.retentionCount,targetType:'local'
@@ -123,11 +141,25 @@ export async function backupRoutes(app:FastifyInstance){
     });
 
     try{
+      let database: z.infer<typeof databaseSecret>|undefined;
+      if(job.kind==='postgres'||job.kind==='mysql'){
+        if(!job.source_secret_id)throw new Error('Database backup source secret is missing');
+        let plaintext='';
+        try{
+          plaintext=await readSecretValueForService(job.source_secret_id,job.organization_id);
+          database=databaseSecret.parse(JSON.parse(plaintext));
+        }catch{
+          throw Object.assign(new Error('Database backup source secret is invalid'),{statusCode:400});
+        }finally{
+          plaintext='';
+        }
+      }
       const raw=await sendAgentCommand(job.server_id,'backup.execute',{
         backupId:created.id,
         kind:job.kind,
         source:job.source,
-        targetType:'local'
+        targetType:'local',
+        database
       },30*60_000);
       const result=runResult.parse(raw);
       const completed=await transaction(async db=>{
