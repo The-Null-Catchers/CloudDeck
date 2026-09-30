@@ -36,3 +36,10 @@ A distributed TLS runner claims due domains with PostgreSQL `FOR UPDATE SKIP LOC
 Certificate expiry warnings use the normal alert and notification pipeline. The default warning window is 14 days and can be bounded with `SSL_EXPIRY_WARNING_DAYS`. Expiry alerts are de-duplicated per domain and resolve automatically after a later valid certificate has more than the warning window remaining.
 
 Reverse-proxy mutation is intentionally not performed by the unprivileged agent in this stage. The production agent runs with `NoNewPrivileges=true` and a strict writable-path sandbox; Caddy/Nginx automation will use a separate constrained privileged helper instead of weakening that sandbox.
+
+
+## Encrypted secret storage
+
+Secret metadata is stored in `secrets` while encrypted values live in the separate `secret_values` table. Values use AES-256-GCM with a fresh 96-bit IV per write and a versioned key reference. The API never returns plaintext secret values; list/create/update responses expose metadata and a configured-value marker only.
+
+The current key provider reads a 32-byte base64 master key from `CLOUDDECK_MASTER_KEY` at encryption/decryption time. This keeps the crypto boundary isolated behind `secret-crypto.ts` so a KMS/Vault provider and multi-version key rotation can replace local key material later without changing the database or public API contract. Server-side consumers must resolve values through the internal service helper rather than adding a reveal endpoint.
