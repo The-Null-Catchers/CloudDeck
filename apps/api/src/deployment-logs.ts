@@ -38,7 +38,7 @@ async function readLogs(deploymentId:string,after:number,limit:number){
      LIMIT $3`,
     [deploymentId,after,limit]
   );
-  return rows.rows;
+  return rows.rows.map(row=>({...row,id:Number(row.id)}));
 }
 
 export async function deploymentLogRoutes(app:FastifyInstance){
