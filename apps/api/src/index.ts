@@ -20,6 +20,8 @@ import {githubWebhookRoutes} from './github-webhook.js';
 import {applicationRoutes} from './applications.js';
 import {healthCheckRoutes} from './health-checks.js';
 import {alertRoutes} from './alerts.js';
+import {domainRoutes} from './domains.js';
+import {startDomainTlsRunner} from './domain-runner.js';
 import {startHealthCheckRunner} from './health-runner.js';
 import {startDeploymentQueueReconciler,closeDeploymentQueue} from './deployment-queue.js';
 import {startDeploymentWorker,closeDeploymentWorker} from './deployment-worker.js';
@@ -60,6 +62,7 @@ export function buildApp() {
   app.register(applicationRoutes,{prefix:'/api/v1'});
   app.register(healthCheckRoutes,{prefix:'/api/v1'});
   app.register(alertRoutes,{prefix:'/api/v1'});
+  app.register(domainRoutes,{prefix:'/api/v1'});
   return app;
 }
 
@@ -70,12 +73,14 @@ if (process.env.NODE_ENV !== 'test') {
   const stopDeploymentQueueReconciler=startDeploymentQueueReconciler();
   startDeploymentWorker();
   const stopHealthCheckRunner=startHealthCheckRunner();
+  const stopDomainTlsRunner=startDomainTlsRunner();
   const stopNotificationQueueReconciler=startNotificationQueueReconciler();
   startNotificationWorker();
   app.addHook('onClose',async()=>{
     stopSweep();
     stopDeploymentQueueReconciler();
     stopHealthCheckRunner();
+    stopDomainTlsRunner();
     stopNotificationQueueReconciler();
     await closeNotificationWorker();
     await closeNotificationQueue();

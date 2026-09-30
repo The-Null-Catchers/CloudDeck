@@ -16,11 +16,12 @@ export async function alertRoutes(app:FastifyInstance){
     const {state,limit}=listQuery.parse(request.query);
     await membership(userId,orgId,'alert.read');
     const rows=await pool.query(
-      `SELECT a.id,a.organization_id,a.server_id,a.health_check_id,a.kind,a.state,a.created_at,a.resolved_at,
+      `SELECT a.id,a.organization_id,a.server_id,a.health_check_id,a.domain_id,a.kind,a.state,a.created_at,a.resolved_at,
               h.name AS health_check_name,h.kind AS health_check_kind,h.target AS health_check_target,
-              s.name AS server_name
+              d.hostname AS domain_hostname,s.name AS server_name
        FROM alerts a
        LEFT JOIN health_checks h ON h.id=a.health_check_id
+       LEFT JOIN domains d ON d.id=a.domain_id
        LEFT JOIN servers s ON s.id=a.server_id
        WHERE a.organization_id=$1
          AND ($2='all' OR a.state=$2)
