@@ -154,9 +154,9 @@ When cancellation is requested, only the matching deployment context is cancelle
 A cancellation command returns whether an active matching deployment execution was found. The API does not treat that acknowledgement as completion; the durable deployment state changes to `cancelled` only after the deployment worker observes the execution command stop.
 
 
-## Verified local backup commands
+## Verified backup commands
 
-`backup.execute` is a long-running typed action with backup UUID, kind, source, target type, and an optional structured database credential object. It accepts `directory`, `docker_volume`, `postgres`, and `mysql` sources and only the `local` target in this stage. It never accepts shell text or a destination filesystem path from the API.
+`backup.execute` is a long-running typed action with backup UUID, kind, source, target type, and optional structured database/S3 credential objects. It accepts `directory`, `docker_volume`, `postgres`, and `mysql` sources with either `local` or `s3` targets. It never accepts shell text or an arbitrary destination filesystem path from the API.
 
 Directory sources must resolve inside one of the comma-separated absolute roots configured in `CLOUDDECK_BACKUP_SOURCE_ROOTS`. Symlinks and special files are rejected while walking the source tree. Local Docker-volume backups accept only strict volume names, require the Docker `local` driver, and require the resolved mountpoint to stay under `CLOUDDECK_DOCKER_VOLUME_ROOT` (default `/var/lib/docker/volumes`).
 
@@ -165,3 +165,7 @@ For PostgreSQL/MySQL sources the Agent validates host, port, username, database,
 Archives are written under the Agent-controlled `CLOUDDECK_BACKUP_DIR` (default `/var/lib/clouddeck-agent/backups`) with mode 0600. The filename is derived only from the CloudDeck backup UUID. After closing and syncing the gzip/tar archive, the Agent reopens and fully reads it, rejects unsafe entry paths, and only then returns `verified:true`, SHA-256, size, and entry count. The API cannot persist a backup as `successful` without that validated result.
 
 `backup.deleteLocal` accepts only a UUID-derived `<backup-id>.tar.gz` storage key. It is used for retention cleanup and confirmed backup-job deletion, and never accepts an arbitrary path.
+
+For `targetType: "s3"`, the payload also contains a validated transient S3 configuration: endpoint, region, bucket, access key, secret key, optional session token, and optional object prefix. The Agent creates the archive locally first, verifies it, uploads with a signed PUT, and then performs a signed HEAD. The HEAD must return the exact archive size and the same SHA-256 stored in `x-amz-meta-clouddeck-sha256` before the command can return `verified:true`.
+
+`backup.deleteS3` accepts only a previously persisted object key plus the structured S3 target configuration. The object key must end in the UUID-derived archive name and remain under the configured prefix. The action exposes no list/read/copy operation and does not accept arbitrary bucket changes or shell text.
