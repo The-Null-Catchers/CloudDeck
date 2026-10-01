@@ -21,6 +21,7 @@ test('database backup secret parser accepts bounded structured credentials',()=>
 test('database backup secret parser rejects URI and option injection shapes',()=>{
   for(const value of [
     'postgres://user:pass@db/app',
+    ...['secret\nextra','secret\rextra','secret\0extra'].map(password=>JSON.stringify({host:'db.internal',port:5432,username:'backup',password,sslMode:'require'})),
     JSON.stringify({host:'db.internal;touch /tmp/x',port:5432,username:'backup',password:'secret',sslMode:'require'}),
     JSON.stringify({host:'db.internal',port:5432,username:'bad user',password:'secret',sslMode:'require'}),
     JSON.stringify({host:'db.internal',port:5432,username:'backup',password:'secret',sslMode:'require',extra:'--flag'})

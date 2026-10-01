@@ -8,12 +8,12 @@ import {readSecretValueForService} from './secrets.js';
 const uuid=z.uuid();
 const volumeName=z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 const directoryPath=z.string().trim().min(1).max(500).regex(/^\//,'Directory source must be an absolute path');
-const databaseName=z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_.-]+$/,'Database name contains unsupported characters');
+const databaseName=z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/,'Database name contains unsupported characters');
 const databaseSecret=z.object({
   host:z.string().trim().min(1).max(253).regex(/^[A-Za-z0-9_.:-]+$/,'Database host contains unsupported characters'),
   port:z.number().int().min(1).max(65535),
   username:z.string().min(1).max(128).refine(value=>!/\s/.test(value)&&[...value].every(character=>{const code=character.charCodeAt(0);return code>=32&&code!==127;}),'Database username contains unsupported characters'),
-  password:z.string().min(1).max(4096),
+  password:z.string().min(1).max(4096).refine(value=>[...value].every(character=>![0,10,13].includes(character.charCodeAt(0))),'Database password contains unsupported control characters'),
   sslMode:z.enum(['disable','require']).default('require')
 }).strict();
 const createBody=z.discriminatedUnion('kind',[

@@ -21,7 +21,7 @@ type databaseBackupConfig struct {
 }
 
 var databaseHostPattern=regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,253}$`)
-var databaseNamePattern=regexp.MustCompile(`^[A-Za-z0-9_.-]{1,128}$`)
+var databaseNamePattern=regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 var databaseUserPattern=regexp.MustCompile(`^[^\s\x00-\x1f\x7f]{1,128}$`)
 
 func validateDatabaseBackupConfig(kind,databaseName string,config *databaseBackupConfig) error {
@@ -31,7 +31,7 @@ func validateDatabaseBackupConfig(kind,databaseName string,config *databaseBacku
  if !databaseHostPattern.MatchString(config.Host){return errors.New("invalid database host")}
  if config.Port<1||config.Port>65535{return errors.New("invalid database port")}
  if !databaseUserPattern.MatchString(config.Username){return errors.New("invalid database username")}
- if config.Password==""||len(config.Password)>4096{return errors.New("invalid database password")}
+ if config.Password==""||len(config.Password)>4096||strings.ContainsAny(config.Password,"\x00\r\n"){return errors.New("invalid database password")}
  if config.SSLMode!="disable"&&config.SSLMode!="require"{return errors.New("invalid database SSL mode")}
  return nil
 }
@@ -75,9 +75,11 @@ func createDatabaseDump(ctx context.Context,kind,databaseName string,config *dat
  if err!=nil{return "",func(){},errors.New("unable to create database backup staging directory")}
  cleanup:=func(){_ = os.RemoveAll(tempDir)}
  if err:=os.Chmod(tempDir,0700);err!=nil{cleanup();return "",func(){},errors.New("unable to secure database backup staging directory")}
+ dumpDir:=filepath.Join(tempDir,"dump")
+ if err:=os.Mkdir(dumpDir,0700);err!=nil{cleanup();return "",func(){},errors.New("unable to create dump-only staging directory")}
  dumpName:="database.dump"
  if kind=="mysql"{dumpName="database.sql"}
- dumpPath:=filepath.Join(tempDir,dumpName)
+ dumpPath:=filepath.Join(dumpDir,dumpName)
  file,err:=os.OpenFile(dumpPath,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
  if err!=nil{cleanup();return "",func(){},errors.New("unable to create database dump file")}
  limited:=&countingWriter{writer:file,limit:maxBytes}
@@ -140,5 +142,5 @@ func createDatabaseDump(ctx context.Context,kind,databaseName string,config *dat
   verify.Stderr=io.Discard
   if err:=verify.Run();err!=nil{cleanup();return "",func(){},errors.New("PostgreSQL dump verification failed")}
  }
- return tempDir,cleanup,nil
+ return dumpDir,cleanup,nil
 }
