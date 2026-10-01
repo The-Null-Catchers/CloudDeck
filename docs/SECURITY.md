@@ -10,7 +10,7 @@ RBAC: viewers can read inventory, metrics and logs; operators can perform approv
 
 Realtime Docker/systemd log streams use one-time tickets and are forwarded in memory without log persistence. Browser terminal sessions also use one-time tickets, a dedicated `terminal.access` permission, PTYs, a 30-minute hard timeout, and start/stop audit records. Terminal contents are not stored.
 
-Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, encrypted backup payloads, restore workflow, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
+Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, encrypted backup payloads, filesystem/Docker-volume restore, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
 
 
 ## Health-check SSRF boundary
@@ -79,3 +79,14 @@ The Agent accepts HTTPS S3 endpoints only; plain HTTP is limited to loopback dev
 An S3 backup is staged under the existing Agent-controlled backup directory and must pass the complete local archive verification first. The Agent then uploads the archive with its SHA-256 in object metadata and issues a signed HEAD request. CloudDeck records success only when the remote object size and SHA-256 metadata exactly match the verified local archive. The staging file is removed after either upload success or failure.
 
 S3 retention deletion accepts only object keys ending in the UUID-derived backup filename and, when a prefix is configured, refuses keys outside that prefix. The API deletes PostgreSQL backup metadata only after the typed `backup.deleteS3` operation succeeds. Bucket-wide listing, arbitrary object reads, and arbitrary object deletion are not exposed.
+
+
+## Database restore boundary
+
+Database restore is deliberately narrower than backup creation. Only admins/owners with `backup.manage` can request it, every request requires explicit confirmation, and the API accepts only an existing successful verified backup ID. The database kind, database name, server, storage target, object key, and checksum all come from immutable backup/job state rather than from restore request fields.
+
+Backup and restore start paths lock the owning backup-job row before creating a running operation so a backup and restore cannot be started concurrently for the same job. Restore history is durable and audited for requested, completed, and failed outcomes.
+
+The Agent verifies the recorded archive SHA-256 before any database mutation. S3 restore downloads are signed, redirect-free, prefix-scoped, bounded by the configured backup size limit, and must match both S3 checksum metadata and the persisted backup checksum. Archive extraction accepts only the generated database-dump layout and rejects extra entries.
+
+PostgreSQL and MySQL clients are executed directly without a shell. Credentials are delivered only for the active restore and are written to temporary 0600 client files that are removed with the restore staging directory. Command stdout/stderr are discarded so database data and credentials are not persisted into CloudDeck logs. Filesystem and Docker-volume restore are not exposed yet because safe replacement requires an additional rollback boundary.
