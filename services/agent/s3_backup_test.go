@@ -1,6 +1,8 @@
 package main
 
 import (
+ "crypto/sha256"
+ "encoding/hex"
  "context"
  "fmt"
  "io"
@@ -113,4 +115,25 @@ func TestDeleteS3BackupIsScopedToConfiguredPrefix(t *testing.T){
  if err:=deleteS3Backup(context.Background(),config,"prod/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.tar.gz");err!=nil{t.Fatal(err)}
  if deleted!="/clouddeck-backups/prod/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.tar.gz"{t.Fatalf("unexpected delete path %q",deleted)}
  if err:=deleteS3Backup(context.Background(),config,"other/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.tar.gz");err==nil{t.Fatal("expected deletion outside configured prefix to be rejected")}
+}
+
+
+func TestDownloadS3BackupVerifiesMetadataAndPayloadChecksum(t *testing.T){
+ payload:=[]byte("verified-remote-backup")
+ sum:=sha256.Sum256(payload)
+ expected:=hex.EncodeToString(sum[:])
+ server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+  if r.Method!=http.MethodGet{w.WriteHeader(http.StatusMethodNotAllowed);return}
+  if !strings.HasPrefix(r.Header.Get("Authorization"),"AWS4-HMAC-SHA256 "){t.Error("restore download request was not signed")}
+  w.Header().Set("x-amz-meta-clouddeck-sha256",expected)
+  w.WriteHeader(http.StatusOK)
+  _,_=w.Write(payload)
+ }))
+ defer server.Close()
+ config:=s3BackupConfig{Endpoint:server.URL,Region:"us-east-1",Bucket:"clouddeck-backups",AccessKey:"access",SecretKey:"secret",Prefix:"prod"}
+ destination:=filepath.Join(t.TempDir(),"download.tar.gz")
+ key:="prod/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.tar.gz"
+ if err:=downloadS3Backup(context.Background(),config,key,destination,expected);err!=nil{t.Fatal(err)}
+ data,err:=os.ReadFile(destination);if err!=nil{t.Fatal(err)}
+ if string(data)!=string(payload){t.Fatal("downloaded restore payload changed")}
 }
