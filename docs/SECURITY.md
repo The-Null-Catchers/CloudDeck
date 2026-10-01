@@ -10,7 +10,7 @@ RBAC: viewers can read inventory, metrics and logs; operators can perform approv
 
 Realtime Docker/systemd log streams use one-time tickets and are forwarded in memory without log persistence. Browser terminal sessions also use one-time tickets, a dedicated `terminal.access` permission, PTYs, a 30-minute hard timeout, and start/stop audit records. Terminal contents are not stored.
 
-Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, S3 backup targets, encrypted backup payloads, scheduled dispatch and restore workflow, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
+Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, encrypted backup payloads, restore workflow, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
 
 
 ## Health-check SSRF boundary
@@ -68,3 +68,14 @@ Database backup archives contain only the dump directory. Temporary PostgreSQL/M
 ### Scheduled backups
 
 Recurring backup execution never creates a shell command surface. The scheduler only selects pre-validated backup jobs and reuses the same allowlisted Agent action, encrypted database-secret boundary, archive verification, retention cleanup, and audit trail as manual runs. Due jobs are claimed atomically to prevent duplicate execution across API replicas.
+
+
+## S3-compatible backup boundary
+
+S3 credentials are stored only as encrypted workspace secrets. The API validates target metadata, decrypts the target secret only for an active backup or retention operation, and sends the structured credential object over the already-authenticated Agent WebSocket. Credentials are never persisted into backup rows, manifests, audit metadata, or Agent configuration.
+
+The Agent accepts HTTPS S3 endpoints only; plain HTTP is limited to loopback development endpoints. Endpoint credentials, paths, queries, and fragments are rejected. Uploads use AWS Signature V4 implemented over fixed HTTP PUT/HEAD/DELETE operations rather than a shell or external CLI, and redirects are disabled so signed credentials cannot be forwarded to another host.
+
+An S3 backup is staged under the existing Agent-controlled backup directory and must pass the complete local archive verification first. The Agent then uploads the archive with its SHA-256 in object metadata and issues a signed HEAD request. CloudDeck records success only when the remote object size and SHA-256 metadata exactly match the verified local archive. The staging file is removed after either upload success or failure.
+
+S3 retention deletion accepts only object keys ending in the UUID-derived backup filename and, when a prefix is configured, refuses keys outside that prefix. The API deletes PostgreSQL backup metadata only after the typed `backup.deleteS3` operation succeeds. Bucket-wide listing, arbitrary object reads, and arbitrary object deletion are not exposed.

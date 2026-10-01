@@ -17,7 +17,7 @@ CloudDeck is a multi-server operations and observability platform that combines 
 - Deployment lifecycle state machine with guarded transitions, event history, lifecycle timestamps, RBAC-protected read APIs, and rollback-state support.
 - Domain inventory and distributed TLS certificate monitoring with expiry alerts and SSRF-safe public probing.
 - Encrypted workspace secret storage using AES-256-GCM, metadata/value separation, no plaintext read API, audited rotation/deletion, and admin/owner management.
-- Verified local backups for allowlisted directories, local Docker volumes, PostgreSQL, and MySQL, with typed Agent execution, SHA-256 manifests, archive re-read verification, retention cleanup, audited runs, recurring hourly/daily/weekly schedules, and a responsive backup operations UI with encrypted database credentials.
+- Verified backups for allowlisted directories, local Docker volumes, PostgreSQL, and MySQL, with local or S3-compatible targets, typed Agent execution, SHA-256 manifests, archive re-read verification, signed S3 post-upload verification, retention cleanup, audited runs, recurring hourly/daily/weekly schedules, and encrypted database/S3 credentials.
 
 ## Architecture
 
@@ -81,7 +81,7 @@ See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [arc
 4. Browser terminal — dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, a 30-minute limit, and xterm.js server-detail UI with automatic fitting/resize.
 5. Deployments — guarded state machine/read APIs, verified GitHub App linking, installation-scoped repository/branch discovery, and validated Application source configuration implemented; next: BullMQ execution, health activation, and rollback orchestration.
 6. Health checks, alert rules and email/in-app notifications.
-7. Domains/TLS monitoring, encrypted secrets, and verified local directory/Docker-volume/PostgreSQL/MySQL backups with recurring scheduling are functional; S3 targets, restore workflows, and constrained proxy automation remain.
+7. Domains/TLS monitoring, encrypted secrets, and verified local/S3-compatible directory/Docker-volume/PostgreSQL/MySQL backups with recurring scheduling are functional; restore workflows, encrypted backup payloads, and constrained proxy automation remain.
 8. Flutter monitoring and emergency-operation mobile app.
 
 No UI or API response claims a pending feature was performed.
