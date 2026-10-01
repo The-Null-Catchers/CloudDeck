@@ -28,6 +28,7 @@ type backupExecutePayload struct {
  Kind string `json:"kind"`
  Source string `json:"source"`
  TargetType string `json:"targetType"`
+ Database *databaseBackupConfig `json:"database,omitempty"`
 }
 
 type backupExecutionResult struct {
@@ -169,20 +170,29 @@ func executeLocalBackup(ctx context.Context,payload backupExecutePayload)(backup
  var out backupExecutionResult
  if !backupIDPattern.MatchString(payload.BackupID){return out,errors.New("invalid backup ID")}
  if payload.TargetType!="local"{return out,errors.New("unsupported backup target")}
- var source string
- var err error
- switch payload.Kind{
- case "directory":source,err=resolveAllowedDirectory(payload.Source)
- case "docker_volume":source,err=resolveDockerVolume(payload.Source)
- default:return out,errors.New("unsupported backup kind")
- }
- if err!=nil{return out,err}
  targetRoot:=strings.TrimSpace(os.Getenv("CLOUDDECK_BACKUP_DIR"))
  if targetRoot==""{targetRoot="/var/lib/clouddeck-agent/backups"}
  if !filepath.IsAbs(targetRoot){return out,errors.New("backup target directory must be absolute")}
  if err:=os.MkdirAll(targetRoot,0700);err!=nil{return out,errors.New("unable to create backup target directory")}
- targetRoot,err=filepath.EvalSymlinks(filepath.Clean(targetRoot))
+ resolvedTargetRoot,err:=filepath.EvalSymlinks(filepath.Clean(targetRoot))
  if err!=nil{return out,errors.New("unable to resolve backup target directory")}
+ targetRoot=resolvedTargetRoot
+
+ var source string
+ cleanup:=func(){}
+ switch payload.Kind{
+ case "directory":
+  source,err=resolveAllowedDirectory(payload.Source)
+ case "docker_volume":
+  source,err=resolveDockerVolume(payload.Source)
+ case "postgres","mysql":
+  source,cleanup,err=createDatabaseDump(ctx,payload.Kind,payload.Source,payload.Database,targetRoot,backupMaxBytes())
+ default:
+  return out,errors.New("unsupported backup kind")
+ }
+ if err!=nil{return out,err}
+ defer cleanup()
+
  storageKey:=payload.BackupID+".tar.gz"
  path:=filepath.Join(targetRoot,storageKey)
  file,err:=os.OpenFile(path,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
