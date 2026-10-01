@@ -17,7 +17,7 @@ CloudDeck is a multi-server operations and observability platform that combines 
 - Deployment lifecycle state machine with guarded transitions, event history, lifecycle timestamps, RBAC-protected read APIs, and rollback-state support.
 - Domain inventory and distributed TLS certificate monitoring with expiry alerts and SSRF-safe public probing.
 - Encrypted workspace secret storage using AES-256-GCM, metadata/value separation, no plaintext read API, audited rotation/deletion, and admin/owner management.
-- Verified local backups for allowlisted directories, local Docker volumes, PostgreSQL, and MySQL, with typed Agent execution, SHA-256 manifests, archive re-read verification, retention cleanup, audited runs, and a responsive backup operations UI.
+- Verified local backups for allowlisted directories, local Docker volumes, PostgreSQL, and MySQL, with typed Agent execution, SHA-256 manifests, archive re-read verification, retention cleanup, audited runs, and a responsive backup operations UI with database source selection and encrypted connection creation.
 
 ## Architecture
 
