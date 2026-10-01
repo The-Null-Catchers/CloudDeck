@@ -18,17 +18,41 @@ const databaseSecret=z.object({
   password:z.string().min(1).max(4096).refine(value=>[...value].every(character=>![0,10,13].includes(character.charCodeAt(0))),'Database password contains unsupported control characters'),
   sslMode:z.enum(['disable','require']).default('require')
 }).strict();
+const safeSecretText=(max:number)=>z.string().min(1).max(max).refine(value=>[...value].every(character=>{const code=character.charCodeAt(0);return code>=32&&code!==127;}),'S3 credential contains unsupported control characters');
+const s3Secret=z.object({
+  endpoint:z.string().trim().url().max(500),
+  region:z.string().trim().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/,'S3 region contains unsupported characters'),
+  bucket:z.string().trim().min(3).max(63).regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/,'S3 bucket is invalid').refine(value=>!value.includes('..'),'S3 bucket is invalid'),
+  accessKey:safeSecretText(256).refine(value=>!/[\s]/.test(value),'S3 access key contains whitespace'),
+  secretKey:safeSecretText(512),
+  sessionToken:z.string().max(4096).refine(value=>[...value].every(character=>{const code=character.charCodeAt(0);return code>=32&&code!==127;}),'S3 session token contains unsupported control characters').optional().default(''),
+  prefix:z.string().trim().max(200).regex(/^[A-Za-z0-9._/-]*$/,'S3 prefix contains unsupported characters').refine(value=>!value.startsWith('/')&&!value.endsWith('/')&&!value.includes('//')&&value.split('/').every(segment=>segment!=='.'&&segment!=='..'),'S3 prefix is invalid').optional().default('')
+}).strict().superRefine((value,ctx)=>{
+  const endpoint=new URL(value.endpoint);
+  if(endpoint.username||endpoint.password||endpoint.search||endpoint.hash||(endpoint.pathname&&endpoint.pathname!='/')){
+    ctx.addIssue({code:'custom',message:'S3 endpoint must not contain credentials, path, query, or fragment',path:['endpoint']});
+  }
+  const loopback=['localhost','127.0.0.1','::1','[::1]'].includes(endpoint.hostname.toLowerCase());
+  if(endpoint.protocol!=='https:'&&!(endpoint.protocol==='http:'&&loopback)){
+    ctx.addIssue({code:'custom',message:'S3 endpoint must use HTTPS except for loopback development endpoints',path:['endpoint']});
+  }
+});
 const commonCreate={
   name:z.string().trim().min(1).max(120),
   serverId:uuid,
   retentionCount:z.number().int().min(1).max(100).default(7),
-  schedule:backupSchedule.default('manual')
+  schedule:backupSchedule.default('manual'),
+  targetType:z.enum(['local','s3']).default('local'),
+  targetSecretId:uuid.optional()
 };
 const createBody=z.discriminatedUnion('kind',[
   z.object({...commonCreate,kind:z.literal('directory'),source:directoryPath}).strict(),
   z.object({...commonCreate,kind:z.literal('docker_volume'),source:volumeName}).strict(),
   z.object({...commonCreate,kind:z.enum(['postgres','mysql']),source:databaseName,sourceSecretId:uuid}).strict()
-]);
+]).superRefine((value,ctx)=>{
+  if(value.targetType==='s3'&&!value.targetSecretId)ctx.addIssue({code:'custom',message:'S3 target credentials are required',path:['targetSecretId']});
+  if(value.targetType==='local'&&value.targetSecretId)ctx.addIssue({code:'custom',message:'Local backups cannot include S3 target credentials',path:['targetSecretId']});
+});
 
 export function nextBackupRun(schedule:BackupSchedule,from=new Date()){
   if(schedule==='manual')return null;
@@ -47,6 +71,14 @@ export function parseDatabaseBackupSecret(value:string){
   if(!parsed.success)throw Object.assign(new Error('Database backup source secret is invalid'),{statusCode:400});
   return parsed.data;
 }
+export function parseS3BackupSecret(value:string){
+  let decoded:unknown;
+  try{decoded=JSON.parse(value)}
+  catch{throw Object.assign(new Error('S3 backup target secret is invalid'),{statusCode:400})}
+  const parsed=s3Secret.safeParse(decoded);
+  if(!parsed.success)throw Object.assign(new Error('S3 backup target secret is invalid'),{statusCode:400});
+  return parsed.data;
+}
 
 const runResult=z.object({
   storageKey:z.string().min(1).max(500),
@@ -59,7 +91,7 @@ const runResult=z.object({
 async function backupJob(jobId:string){
   const result=await pool.query(
     `SELECT b.id,b.organization_id,b.server_id,b.name,b.kind,b.source,b.source_secret_id,b.schedule,b.retention_count,b.target_type,b.enabled,
-            b.next_run_at,b.last_scheduled_at,b.created_by,b.created_at,b.updated_at,s.name AS server_name,s.status AS server_status
+            b.next_run_at,b.last_scheduled_at,b.target_secret_id,b.created_by,b.created_at,b.updated_at,s.name AS server_name,s.status AS server_status
      FROM backup_jobs b JOIN servers s ON s.id=b.server_id
      WHERE b.id=$1`,
     [jobId]
@@ -106,22 +138,34 @@ export async function executeBackupJob(jobId:string,trigger:BackupTrigger){
         plaintext='';
       }
     }
+    let s3:z.infer<typeof s3Secret>|undefined;
+    if(job.target_type==='s3'){
+      if(!job.target_secret_id)throw new Error('S3 backup target secret is missing');
+      let plaintext='';
+      try{
+        plaintext=await readSecretValueForService(job.target_secret_id,job.organization_id);
+        s3=parseS3BackupSecret(plaintext);
+      }finally{
+        plaintext='';
+      }
+    }
     const raw=await sendAgentCommand(job.server_id,'backup.execute',{
       backupId:created.id,
       kind:job.kind,
       source:job.source,
-      targetType:'local',
-      database
+      targetType:job.target_type,
+      database,
+      s3
     },30*60_000);
     const result=runResult.parse(raw);
     const completed=await transaction(async db=>{
       const updated=await db.query(
         `UPDATE backups
          SET status='successful',size_bytes=$2,verified_at=now(),finished_at=now(),storage_key=$3,sha256=$4,
-             manifest=jsonb_build_object('entryCount',$5,'verification','archive-read+sha256')
+             manifest=jsonb_build_object('entryCount',$5,'verification',CASE WHEN $6='s3' THEN 'archive-read+sha256+s3-head' ELSE 'archive-read+sha256' END)
          WHERE id=$1 AND status='running'
          RETURNING id,job_id,status,size_bytes,verified_at,started_at,finished_at,storage_key,sha256,manifest,created_at`,
-        [created.id,result.sizeBytes,result.storageKey,result.sha256,result.entryCount]
+        [created.id,result.sizeBytes,result.storageKey,result.sha256,result.entryCount,job.target_type]
       );
       if(!updated.rowCount)throw new Error('Backup state changed unexpectedly');
       await audit(job.organization_id,trigger.actorId,'backup.run.completed','backup',created.id,trigger.ip,{
@@ -139,7 +183,12 @@ export async function executeBackupJob(jobId:string,trigger:BackupTrigger){
     );
     for(const row of stale.rows as Array<{id:string;storage_key:string}>){
       try{
-        await sendAgentCommand(job.server_id,'backup.deleteLocal',{storageKey:row.storage_key});
+        if(job.target_type==='s3'){
+          if(!s3)throw new Error('S3 backup target secret is missing');
+          await sendAgentCommand(job.server_id,'backup.deleteS3',{storageKey:row.storage_key,s3},60_000);
+        }else{
+          await sendAgentCommand(job.server_id,'backup.deleteLocal',{storageKey:row.storage_key});
+        }
         await pool.query('DELETE FROM backups WHERE id=$1',[row.id]);
       }catch(error){void error}
     }
@@ -164,7 +213,7 @@ export async function backupRoutes(app:FastifyInstance){
     await membership(userId,orgId,'backup.read');
     const jobs=await pool.query(
       `SELECT b.id,b.organization_id,b.server_id,b.name,b.kind,b.source,b.source_secret_id,b.schedule,b.retention_count,b.target_type,b.enabled,
-              b.next_run_at,b.last_scheduled_at,b.created_by,b.created_at,b.updated_at,s.name AS server_name,s.status AS server_status,
+              b.next_run_at,b.last_scheduled_at,b.target_secret_id,b.created_by,b.created_at,b.updated_at,s.name AS server_name,s.status AS server_status,
               latest.id AS latest_backup_id,latest.status AS latest_backup_status,latest.size_bytes AS latest_backup_size,
               latest.verified_at AS latest_verified_at,latest.created_at AS latest_backup_created_at
        FROM backup_jobs b
@@ -209,16 +258,32 @@ export async function backupRoutes(app:FastifyInstance){
       if(!secret.rowCount)throw Object.assign(new Error('Backup source secret not found in this workspace'),{statusCode:404});
       sourceSecretId=body.sourceSecretId;
     }
+    let targetSecretId:string|null=null;
+    if(body.targetType==='s3'){
+      const secret=await pool.query(
+        'SELECT id FROM secrets WHERE id=$1 AND organization_id=$2 AND kind=$3',
+        [body.targetSecretId,orgId,'backup']
+      );
+      if(!secret.rowCount)throw Object.assign(new Error('S3 backup target secret not found in this workspace'),{statusCode:404});
+      let plaintext='';
+      try{
+        plaintext=await readSecretValueForService(body.targetSecretId!,orgId);
+        parseS3BackupSecret(plaintext);
+      }finally{
+        plaintext='';
+      }
+      targetSecretId=body.targetSecretId!;
+    }
     const nextRunAt=nextBackupRun(body.schedule);
     const created=await transaction(async db=>{
       const result=await db.query(
-        `INSERT INTO backup_jobs(organization_id,server_id,name,kind,source,source_secret_id,schedule,retention_count,target_type,enabled,created_by,next_run_at)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'local',true,$9,$10)
-         RETURNING id,organization_id,server_id,name,kind,source,source_secret_id,schedule,retention_count,target_type,enabled,next_run_at,created_by,created_at,updated_at`,
-        [orgId,body.serverId,body.name,body.kind,body.source,sourceSecretId,body.schedule,body.retentionCount,userId,nextRunAt]
+        `INSERT INTO backup_jobs(organization_id,server_id,name,kind,source,source_secret_id,schedule,retention_count,target_type,target_secret_id,enabled,created_by,next_run_at)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$12)
+         RETURNING id,organization_id,server_id,name,kind,source,source_secret_id,schedule,retention_count,target_type,target_secret_id,enabled,next_run_at,created_by,created_at,updated_at`,
+        [orgId,body.serverId,body.name,body.kind,body.source,sourceSecretId,body.schedule,body.retentionCount,body.targetType,targetSecretId,userId,nextRunAt]
       );
       await audit(orgId,userId,'backup.job.create','backup_job',result.rows[0].id,request.ip,{
-        kind:body.kind,serverId:body.serverId,retentionCount:body.retentionCount,targetType:'local',schedule:body.schedule
+        kind:body.kind,serverId:body.serverId,retentionCount:body.retentionCount,targetType:body.targetType,schedule:body.schedule
       },db);
       return result.rows[0];
     });
@@ -247,8 +312,23 @@ export async function backupRoutes(app:FastifyInstance){
       `SELECT id,storage_key FROM backups WHERE job_id=$1 AND storage_key IS NOT NULL ORDER BY created_at ASC`,
       [jobId]
     );
+    let s3:z.infer<typeof s3Secret>|undefined;
+    if(job.target_type==='s3'){
+      if(!job.target_secret_id)throw Object.assign(new Error('S3 backup target secret is missing'),{statusCode:409});
+      let plaintext='';
+      try{
+        plaintext=await readSecretValueForService(job.target_secret_id,job.organization_id);
+        s3=parseS3BackupSecret(plaintext);
+      }finally{
+        plaintext='';
+      }
+    }
     for(const row of stored.rows as Array<{id:string;storage_key:string}>){
-      await sendAgentCommand(job.server_id,'backup.deleteLocal',{storageKey:row.storage_key});
+      if(job.target_type==='s3'){
+        await sendAgentCommand(job.server_id,'backup.deleteS3',{storageKey:row.storage_key,s3},60_000);
+      }else{
+        await sendAgentCommand(job.server_id,'backup.deleteLocal',{storageKey:row.storage_key});
+      }
     }
     await transaction(async db=>{
       await db.query('DELETE FROM backup_jobs WHERE id=$1',[jobId]);
