@@ -10,15 +10,17 @@ import {api} from '@/lib/api';
 type Org={id:string;name:string;role:string};
 type ServerRow={id:string;name:string;hostname:string|null;status:'online'|'offline'|'pending'};
 type BackupKind='directory'|'docker_volume'|'postgres'|'mysql';
-type BackupSecret={id:string;name:string;kind:string};
+type BackupSecret={id:string;name:string;kind:string;description?:string|null};
 type BackupSchedule='manual'|'hourly'|'daily'|'weekly';
 type Credentials={name:string;host:string;port:string;username:string;password:string;sslMode:'disable'|'require'};
+type S3Credentials={name:string;endpoint:string;region:string;bucket:string;accessKey:string;secretKey:string;sessionToken:string;prefix:string};
 const emptyCredentials:Credentials={name:'',host:'',port:'5432',username:'',password:'',sslMode:'require'};
+const emptyS3Credentials:S3Credentials={name:'',endpoint:'',region:'us-east-1',bucket:'',accessKey:'',secretKey:'',sessionToken:'',prefix:''};
 const sourceLabels:Record<BackupKind,string>={directory:'Directory',docker_volume:'Docker volume',postgres:'PostgreSQL',mysql:'MySQL'};
 
 type BackupJob={
   id:string;organization_id:string;server_id:string;name:string;kind:BackupKind;source:string;source_secret_id:string|null;
-  schedule:BackupSchedule;retention_count:number;target_type:'local';enabled:boolean;server_name:string;server_status:string;
+  schedule:BackupSchedule;retention_count:number;target_type:'local'|'s3';target_secret_id:string|null;enabled:boolean;server_name:string;server_status:string;
   next_run_at:string|null;last_scheduled_at:string|null;
   latest_backup_id:string|null;latest_backup_status:'running'|'successful'|'failed'|null;latest_backup_size:number|null;
   latest_verified_at:string|null;latest_backup_created_at:string|null;
@@ -28,9 +30,9 @@ type BackupRow={
   verified_at:string|null;started_at:string|null;finished_at:string|null;storage_key:string|null;sha256:string|null;
   error:string|null;manifest:{entryCount?:number;verification?:string};created_at:string;
 };
-type Form={name:string;serverId:string;kind:BackupKind;source:string;sourceSecretId:string;retentionCount:string;schedule:BackupSchedule};
+type Form={name:string;serverId:string;kind:BackupKind;source:string;sourceSecretId:string;retentionCount:string;schedule:BackupSchedule;targetType:'local'|'s3';targetSecretId:string};
 
-const emptyForm:Form={name:'',serverId:'',kind:'directory',source:'',sourceSecretId:'',retentionCount:'7',schedule:'manual'};
+const emptyForm:Form={name:'',serverId:'',kind:'directory',source:'',sourceSecretId:'',retentionCount:'7',schedule:'manual',targetType:'local',targetSecretId:''};
 
 function when(value:string|null){return value?new Date(value).toLocaleString():'Never'}
 function bytes(value:number|null){
@@ -44,11 +46,14 @@ function bytes(value:number|null){
 export default function BackupsPage(){
   const router=useRouter();
   const credentialFields=useRef<HTMLFieldSetElement>(null);
+  const s3CredentialFields=useRef<HTMLFieldSetElement>(null);
   const [org,setOrg]=useState<Org|null>(null);
   const [servers,setServers]=useState<ServerRow[]>([]);
   const [secrets,setSecrets]=useState<BackupSecret[]>([]);
   const [credentials,setCredentials]=useState<Credentials>(emptyCredentials);
   const [showCredentials,setShowCredentials]=useState(false);
+  const [s3Credentials,setS3Credentials]=useState<S3Credentials>(emptyS3Credentials);
+  const [showS3Credentials,setShowS3Credentials]=useState(false);
   const [jobs,setJobs]=useState<BackupJob[]>([]);
   const [history,setHistory]=useState<Record<string,BackupRow[]>>({});
   const [expanded,setExpanded]=useState<string|null>(null);
@@ -60,6 +65,9 @@ export default function BackupsPage(){
 
   const canManage=org?.role==='owner'||org?.role==='admin';
   const isDatabase=form.kind==='postgres'||form.kind==='mysql';
+  const isS3Target=form.targetType==='s3';
+  const databaseSecrets=secrets.filter(item=>item.description!=='clouddeck:s3-target');
+  const s3Secrets=secrets.filter(item=>item.description==='clouddeck:s3-target');
 
   async function load(silent=false){
     if(!silent)setLoading(true);
@@ -82,7 +90,7 @@ export default function BackupsPage(){
 
   async function createJob(event:React.FormEvent){
     event.preventDefault();
-    if(!org||!canManage||busy!==null||showCredentials||(isDatabase&&!form.sourceSecretId))return;
+    if(!org||!canManage||busy!==null||showCredentials||showS3Credentials||(isDatabase&&!form.sourceSecretId)||(isS3Target&&!form.targetSecretId))return;
     setBusy('create');setError('');
     try{
       await api(`/organizations/${org.id}/backup-jobs`,{
@@ -94,7 +102,9 @@ export default function BackupsPage(){
           source:form.source.trim(),
           ...(isDatabase?{sourceSecretId:form.sourceSecretId}:{}),
           retentionCount:Number(form.retentionCount),
-          schedule:form.schedule
+          schedule:form.schedule,
+          targetType:form.targetType,
+          ...(isS3Target?{targetSecretId:form.targetSecretId}:{})
         })
       });
       closeCreate();await load(true);
@@ -103,7 +113,7 @@ export default function BackupsPage(){
   }
 
   function closeCreate(){
-    setShowCreate(false);setShowCredentials(false);setCredentials(emptyCredentials);setForm(current=>({...emptyForm,serverId:current.serverId}));
+    setShowCreate(false);setShowCredentials(false);setShowS3Credentials(false);setCredentials(emptyCredentials);setS3Credentials(emptyS3Credentials);setForm(current=>({...emptyForm,serverId:current.serverId}));
   }
 
   function changeKind(kind:BackupKind){
@@ -122,7 +132,7 @@ export default function BackupsPage(){
     setBusy('credentials');setError('');
     try{
       const secret=await api<BackupSecret>(`/organizations/${org.id}/secrets`,{
-        method:'POST',body:JSON.stringify({name:credentials.name.trim(),kind:'backup',value:JSON.stringify({
+        method:'POST',body:JSON.stringify({name:credentials.name.trim(),kind:'backup',description:'clouddeck:database-source',value:JSON.stringify({
           host:credentials.host.trim(),port:Number(credentials.port),username:credentials.username,
           password:credentials.password,sslMode:credentials.sslMode
         })})
@@ -131,6 +141,30 @@ export default function BackupsPage(){
       setForm(current=>({...current,sourceSecretId:secret.id}));
       setCredentials({...emptyCredentials,port:form.kind==='mysql'?'3306':'5432'});setShowCredentials(false);
     }catch(e){setError(e instanceof Error?e.message:'Unable to save database credentials')}
+    finally{setBusy(null)}
+  }
+
+  async function saveS3Credentials(){
+    if(!org||!canManage||!isS3Target)return;
+    const fields=s3CredentialFields.current?.querySelectorAll('input,select');
+    if(fields&&[...fields].some(field=>!(field as HTMLInputElement).reportValidity()))return;
+    let endpoint:URL;
+    try{endpoint=new URL(s3Credentials.endpoint.trim())}catch{setError('Enter a valid S3 endpoint URL.');return}
+    const loopback=['localhost','127.0.0.1','::1','[::1]'].includes(endpoint.hostname.toLowerCase());
+    if(endpoint.protocol!=='https:'&&!(endpoint.protocol==='http:'&&loopback)){setError('S3 endpoints must use HTTPS except for localhost development.');return}
+    if(endpoint.username||endpoint.password||endpoint.search||endpoint.hash||(endpoint.pathname&&endpoint.pathname!=='/')){setError('S3 endpoint cannot include credentials, a path, query, or fragment.');return}
+    setBusy('s3-credentials');setError('');
+    try{
+      const secret=await api<BackupSecret>(`/organizations/${org.id}/secrets`,{
+        method:'POST',body:JSON.stringify({name:s3Credentials.name.trim(),kind:'backup',description:'clouddeck:s3-target',value:JSON.stringify({
+          endpoint:s3Credentials.endpoint.trim(),region:s3Credentials.region.trim(),bucket:s3Credentials.bucket.trim(),
+          accessKey:s3Credentials.accessKey,secretKey:s3Credentials.secretKey,sessionToken:s3Credentials.sessionToken,prefix:s3Credentials.prefix.trim()
+        })})
+      });
+      setSecrets(current=>[...current,secret]);
+      setForm(current=>({...current,targetSecretId:secret.id}));
+      setS3Credentials(emptyS3Credentials);setShowS3Credentials(false);
+    }catch(e){setError(e instanceof Error?e.message:'Unable to save S3 credentials')}
     finally{setBusy(null)}
   }
 
@@ -156,7 +190,7 @@ export default function BackupsPage(){
   }
 
   async function remove(job:BackupJob){
-    if(!canManage||!confirm(`Delete backup job "${job.name}" and its local archives? This cannot be undone.`))return;
+    if(!canManage||!confirm(`Delete backup job "${job.name}" and its stored ${job.target_type==="s3"?"S3 objects":"local archives"}? This cannot be undone.`))return;
     setBusy(`delete:${job.id}`);setError('');
     try{
       await api(`/backup-jobs/${job.id}`,{method:'DELETE',body:JSON.stringify({confirm:true})});
@@ -182,7 +216,7 @@ export default function BackupsPage(){
 
     <main className="deploy-content">
       <section className="deploy-hero">
-        <div><span className="eyebrow">OPERATIONS / BACKUPS</span><h1>Verified backups</h1><p>Create Agent-verified local backups for allowlisted directories, Docker volumes, PostgreSQL, and MySQL, with safe recurring schedules.</p></div>
+        <div><span className="eyebrow">OPERATIONS / BACKUPS</span><h1>Verified backups</h1><p>Create Agent-verified backups for directories, Docker volumes, PostgreSQL, and MySQL using local or S3-compatible storage with safe recurring schedules.</p></div>
         <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading||busy!==null}><RefreshCw size={15}/> Refresh</button>{canManage&&<button className="primary" onClick={()=>showCreate?closeCreate():setShowCreate(true)} disabled={busy!==null}><Plus size={15}/> New backup job</button>}</div>
       </section>
 
@@ -196,15 +230,17 @@ export default function BackupsPage(){
       </section>
 
       {showCreate&&canManage&&<form className="deploy-section backup-form" onSubmit={createJob}>
-        <div className="deploy-section-head"><div><h2>Create local backup job</h2><p>Choose a source on the managed server. Database jobs use encrypted connection credentials and store only a reference to the secret.</p></div></div>
+        <div className="deploy-section-head"><div><h2>Create backup job</h2><p>Choose a source and storage target. Database and S3 credentials stay encrypted and are only decrypted for the Agent when a backup operation requires them.</p></div></div>
         <div className="domain-form-grid">
           <label>Name<input required maxLength={120} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Production uploads"/></label>
           <label>Server<select required value={form.serverId} onChange={e=>setForm({...form,serverId:e.target.value})}><option value="">Choose server</option>{servers.map(item=><option key={item.id} value={item.id}>{item.name} · {item.status}</option>)}</select></label>
           <label>Source type<select disabled={busy!==null} value={form.kind} onChange={e=>changeKind(e.target.value as BackupKind)}><option value="directory">Directory</option><option value="docker_volume">Docker volume</option><option value="postgres">PostgreSQL</option><option value="mysql">MySQL</option></select></label>
           <label>{isDatabase?'Database name':form.kind==='directory'?'Absolute directory':'Docker volume name'}<input required value={form.source} onChange={e=>setForm({...form,source:e.target.value})} maxLength={isDatabase?128:500} pattern={isDatabase?String.raw`[A-Za-z0-9_][A-Za-z0-9_.\-]*`:undefined} placeholder={isDatabase?'appdb':form.kind==='directory'?'/srv/app/uploads':'app-data'}/></label>
-          {isDatabase&&<label>Connection secret<select required value={form.sourceSecretId} onChange={e=>setForm({...form,sourceSecretId:e.target.value})}><option value="">Choose encrypted credentials</option>{secrets.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+          {isDatabase&&<label>Connection secret<select required value={form.sourceSecretId} onChange={e=>setForm({...form,sourceSecretId:e.target.value})}><option value="">Choose encrypted credentials</option>{databaseSecrets.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
           <label>Retention count<input required type="number" min={1} max={100} value={form.retentionCount} onChange={e=>setForm({...form,retentionCount:e.target.value})}/></label>
           <label>Schedule<select value={form.schedule} onChange={e=>setForm({...form,schedule:e.target.value as BackupSchedule})}><option value="manual">Manual only</option><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
+          <label>Storage target<select value={form.targetType} onChange={e=>{const targetType=e.target.value as Form['targetType'];setForm({...form,targetType,targetSecretId:''});setShowS3Credentials(false)}}><option value="local">Local filesystem</option><option value="s3">S3-compatible</option></select></label>
+          {isS3Target&&<label>S3 target secret<select required value={form.targetSecretId} onChange={e=>setForm({...form,targetSecretId:e.target.value})}><option value="">Choose encrypted S3 credentials</option>{s3Secrets.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
         </div>
         {isDatabase&&<div className="backup-credentials">
           <p>Use a backup secret containing host, port, username, password, and SSL mode. <button type="button" disabled={busy!==null} onClick={()=>{setShowCredentials(value=>!value);setCredentials({...emptyCredentials,port:form.kind==='mysql'?'3306':'5432'})}}>{showCredentials?'Cancel new credentials':'Add connection credentials'}</button></p>
@@ -222,7 +258,25 @@ export default function BackupsPage(){
             <button type="button" className="primary" disabled={busy!==null||!credentials.name.trim()||!credentials.host.trim()||!credentials.username||!credentials.password||!Number.isInteger(Number(credentials.port))||Number(credentials.port)<1||Number(credentials.port)>65535} onClick={()=>void saveCredentials()}>{busy==='credentials'?'Encrypting…':'Save encrypted credentials'}</button>
           </fieldset>}
         </div>}
-        <div className="domain-form-actions"><button type="button" onClick={closeCreate} disabled={busy!==null}>Cancel</button><button className="primary" disabled={busy!==null||!servers.length||(isDatabase&&(!form.sourceSecretId||showCredentials))}>{busy==='create'?'Creating…':'Create job'}</button></div>
+        {isS3Target&&<div className="backup-credentials">
+          <p>S3-compatible targets use encrypted credentials and AWS Signature V4 from the Agent. <button type="button" disabled={busy!==null} onClick={()=>{setShowS3Credentials(value=>!value);setS3Credentials(emptyS3Credentials)}}>{showS3Credentials?'Cancel new S3 credentials':'Add S3 target credentials'}</button></p>
+          {showS3Credentials&&<fieldset ref={s3CredentialFields} disabled={busy!==null}>
+            <legend>New encrypted S3 target</legend>
+            <div className="domain-form-grid">
+              <label>Secret name<input required maxLength={120} pattern={String.raw`[A-Za-z0-9][A-Za-z0-9_.:\-]*`} value={s3Credentials.name} onChange={e=>setS3Credentials({...s3Credentials,name:e.target.value})} placeholder="production-s3-backups"/></label>
+              <label>Endpoint<input required type="url" maxLength={500} value={s3Credentials.endpoint} onChange={e=>setS3Credentials({...s3Credentials,endpoint:e.target.value})} placeholder="https://s3.example.com"/></label>
+              <label>Region<input required maxLength={64} pattern={String.raw`[A-Za-z0-9][A-Za-z0-9\-]{0,63}`} value={s3Credentials.region} onChange={e=>setS3Credentials({...s3Credentials,region:e.target.value})} placeholder="us-east-1"/></label>
+              <label>Bucket<input required minLength={3} maxLength={63} pattern={String.raw`[a-z0-9][a-z0-9.\-]{1,61}[a-z0-9]`} value={s3Credentials.bucket} onChange={e=>setS3Credentials({...s3Credentials,bucket:e.target.value})} placeholder="clouddeck-backups"/></label>
+              <label>Access key<input required maxLength={256} autoComplete="off" value={s3Credentials.accessKey} onChange={e=>setS3Credentials({...s3Credentials,accessKey:e.target.value})}/></label>
+              <label>Secret key<input required type="password" maxLength={512} autoComplete="new-password" value={s3Credentials.secretKey} onChange={e=>setS3Credentials({...s3Credentials,secretKey:e.target.value})}/></label>
+              <label>Session token (optional)<input type="password" maxLength={4096} autoComplete="new-password" value={s3Credentials.sessionToken} onChange={e=>setS3Credentials({...s3Credentials,sessionToken:e.target.value})}/></label>
+              <label>Object prefix (optional)<input maxLength={200} pattern={String.raw`[A-Za-z0-9._/\-]*`} value={s3Credentials.prefix} onChange={e=>setS3Credentials({...s3Credentials,prefix:e.target.value})} placeholder="production/api"/></label>
+            </div>
+            <p>CloudDeck uploads the already verified archive, then performs a signed HEAD request and checks both object size and SHA-256 metadata before success is recorded.</p>
+            <button type="button" className="primary" disabled={busy!==null||!s3Credentials.name.trim()||!s3Credentials.endpoint.trim()||!s3Credentials.region.trim()||!s3Credentials.bucket.trim()||!s3Credentials.accessKey||!s3Credentials.secretKey} onClick={()=>void saveS3Credentials()}>{busy==='s3-credentials'?'Encrypting…':'Save S3 credentials'}</button>
+          </fieldset>}
+        </div>}
+        <div className="domain-form-actions"><button type="button" onClick={closeCreate} disabled={busy!==null}>Cancel</button><button className="primary" disabled={busy!==null||!servers.length||(isDatabase&&(!form.sourceSecretId||showCredentials))||(isS3Target&&(!form.targetSecretId||showS3Credentials))}>{busy==='create'?'Creating…':'Create job'}</button></div>
       </form>}
 
       <section className="deploy-section">
@@ -231,7 +285,7 @@ export default function BackupsPage(){
           {jobs.map(job=><article className="backup-card" key={job.id}>
             <div className="backup-main">
               <span className="backup-icon">{job.kind==='docker_volume'?<HardDrive size={18}/>:<DatabaseBackup size={18}/>}</span>
-              <div className="backup-copy"><strong>{job.name}</strong><small>{job.server_name} · {sourceLabels[job.kind]} · {job.source}</small><em>Retention {job.retention_count} · local target · {job.schedule==='manual'?'manual':job.schedule}{job.next_run_at?` · next ${when(job.next_run_at)}`:''}</em></div>
+              <div className="backup-copy"><strong>{job.name}</strong><small>{job.server_name} · {sourceLabels[job.kind]} · {job.source}</small><em>Retention {job.retention_count} · {job.target_type==='s3'?'S3-compatible':'local'} target · {job.schedule==='manual'?'manual':job.schedule}{job.next_run_at?` · next ${when(job.next_run_at)}`:''}</em></div>
               <div className="backup-latest">
                 <span className={`health-state ${job.latest_backup_status==='successful'?'healthy':job.latest_backup_status==='failed'?'warning':'pending'}`}>{job.latest_backup_status??'never run'}</span>
                 <strong>{bytes(job.latest_backup_size)}</strong>
@@ -259,7 +313,7 @@ export default function BackupsPage(){
       </section>
 
       <section className="domain-security-note">
-        <ShieldCheck size={17}/><div><strong>Verified before successful</strong><span>CloudDeck never marks a local backup successful until the Agent has re-opened the generated archive, validated its paths, read every entry, and returned SHA-256 metadata.</span></div>
+        <ShieldCheck size={17}/><div><strong>Verified before successful</strong><span>CloudDeck re-opens and validates every archive locally first. S3 targets also require a signed post-upload HEAD verification that matches object size and SHA-256 metadata.</span></div>
       </section>
     </main>
   </div>
