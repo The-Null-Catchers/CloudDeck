@@ -29,6 +29,7 @@ type backupExecutePayload struct {
  Source string `json:"source"`
  TargetType string `json:"targetType"`
  Database *databaseBackupConfig `json:"database,omitempty"`
+ S3 *s3BackupConfig `json:"s3,omitempty"`
 }
 
 type backupExecutionResult struct {
@@ -242,7 +243,7 @@ func executeBackupCommand(ctx context.Context,command agentCommand,write func(an
  if command.Type!="command"||command.RequestID==""||command.Action!="backup.execute"{result.Error="Invalid backup command";_ = write(result);return}
  var payload backupExecutePayload
  if err:=decodeStrict(command.Payload,&payload);err!=nil{result.Error="Invalid backup payload";_ = write(result);return}
- data,err:=executeLocalBackup(ctx,payload)
+ data,err:=executeBackup(ctx,payload)
  if err!=nil{result.Error=err.Error();_ = write(result);return}
  result.Success=true
  result.Data=data
