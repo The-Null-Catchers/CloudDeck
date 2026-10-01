@@ -139,6 +139,10 @@ func connect(endpoint,credential string) error {
      go executeBackupDeleteS3Command(ctx,command,write)
      continue
     }
+    if command.Action=="backup.restoreDatabase"{
+     go executeDatabaseRestoreCommand(ctx,command,write)
+     continue
+    }
     if command.Action=="deployment.execute"{
      go executeDeploymentCommand(ctx,command,write)
      continue
