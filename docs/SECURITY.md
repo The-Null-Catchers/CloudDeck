@@ -63,3 +63,8 @@ The API never chooses an Agent destination path. Archives are stored only in `CL
 Backup creation and deletion require `backup.manage` (admins/owners); viewers and operators receive metadata-only `backup.read`. PostgreSQL and MySQL jobs reference encrypted `backup` secrets. The API decrypts credentials only at execution time and sends a strict structured object over the authenticated Agent channel; credentials are never copied into backup job metadata or audit records. The Agent invokes fixed database dump binaries directly without a shell, puts passwords in temporary 0600 client credential files rather than command arguments, discards command stderr, and removes staging credentials after archival. PostgreSQL dumps additionally require `pg_restore --list` to succeed before archival verification. Remote S3 durability, payload encryption, scheduled execution, and restore support remain pending.
 
 Database backup archives contain only the dump directory. Temporary PostgreSQL/MySQL credential files remain in a separate parent staging directory and are removed with staging on success or failure. Passwords containing NUL or line breaks and option-shaped database names are rejected before execution. Regression tests inspect both archive formats and failed-run cleanup.
+
+
+### Scheduled backups
+
+Recurring backup execution never creates a shell command surface. The scheduler only selects pre-validated backup jobs and reuses the same allowlisted Agent action, encrypted database-secret boundary, archive verification, retention cleanup, and audit trail as manual runs. Due jobs are claimed atomically to prevent duplicate execution across API replicas.
