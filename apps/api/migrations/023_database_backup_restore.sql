@@ -1,6 +1,6 @@
 CREATE TABLE backup_restores (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  backup_id uuid NOT NULL REFERENCES backups(id) ON DELETE RESTRICT,
+  backup_id uuid NOT NULL REFERENCES backups(id) ON DELETE CASCADE,
   job_id uuid NOT NULL REFERENCES backup_jobs(id) ON DELETE CASCADE,
   status text NOT NULL CHECK(status IN ('running','successful','failed')),
   started_at timestamptz NOT NULL DEFAULT now(),
