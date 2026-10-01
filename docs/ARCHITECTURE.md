@@ -59,3 +59,14 @@ For S3-compatible targets the Agent first creates and fully verifies the archive
 ### Backup scheduling
 
 Backup jobs may be manual, hourly, daily, or weekly. The API stores the next due timestamp and a lightweight runner atomically claims due rows with PostgreSQL `FOR UPDATE SKIP LOCKED`, advances their next due time, and then invokes the same typed verified backup execution path used by manual runs. This prevents two API replicas from claiming the same due job while keeping scheduling state durable across restarts. Scheduled runs use a null actor plus `scheduler` audit metadata; normal user-triggered runs preserve the requesting actor.
+
+
+### Database backup restore
+
+Verified PostgreSQL and MySQL backup rows can be restored only to the database source recorded on the owning backup job. The API requires `backup.manage`, an explicit `{"confirm":true}` body, an online Agent, and a previously successful verified backup with persisted SHA-256 metadata.
+
+Restore requests are durable in `backup_restores`. The API locks the owning `backup_jobs` row before starting either a backup or restore so a restore cannot begin while a backup is starting/running on the same job, and vice versa. A partial unique index prevents two restores for one job from being marked running concurrently.
+
+The Agent never receives arbitrary restore paths or SQL text. Local restores resolve only the UUID-derived archive already recorded for the backup. S3 restores issue a signed GET for the recorded prefix-scoped object, require the persisted SHA-256 metadata, stream into a bounded 0600 staging file, and verify the full downloaded checksum before extraction. The tar reader accepts only the expected `dump/database.dump` or `dump/database.sql` layout.
+
+PostgreSQL restoration invokes the fixed `pg_restore` binary with `--clean --if-exists --no-owner --no-privileges --exit-on-error` and temporary 0600 pgpass credentials. MySQL restoration invokes the fixed `mysql` client and streams the verified SQL dump through stdin with temporary client credentials. No shell is used. Restore request/completion/failure are audited. Filesystem and Docker-volume restore remain a separate safety-focused slice because they require a robust on-host rollback strategy before destructive replacement is exposed.

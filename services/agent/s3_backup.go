@@ -181,6 +181,41 @@ func uploadS3Backup(ctx context.Context,config s3BackupConfig,path,localStorageK
  return objectKey,nil
 }
 
+func validBackupSHA(value string)bool{
+ if len(value)!=64{return false}
+ for _,character:=range value{if !((character>='0'&&character<='9')||(character>='a'&&character<='f')){return false}}
+ return true
+}
+
+func downloadS3Backup(ctx context.Context,config s3BackupConfig,objectKey,destination,expectedSHA string)error{
+ if err:=validateS3BackupConfig(&config);err!=nil{return err}
+ if err:=validateS3StoredKey(config,objectKey);err!=nil{return err}
+ if !validBackupSHA(expectedSHA){return errors.New("invalid expected backup checksum")}
+ target,err:=s3ObjectURL(config,objectKey)
+ if err!=nil{return errors.New("invalid S3 target")}
+ request,err:=http.NewRequestWithContext(ctx,http.MethodGet,target.String(),nil)
+ if err!=nil{return errors.New("unable to prepare S3 restore download")}
+ signS3Request(request,config,emptySHA256(),time.Now(),nil)
+ response,err:=s3HTTPClient(30*time.Minute).Do(request)
+ if err!=nil{return errors.New("S3 restore download failed")}
+ defer response.Body.Close()
+ if response.StatusCode<200||response.StatusCode>=300{return fmt.Errorf("S3 restore download returned HTTP %d",response.StatusCode)}
+ remoteSHA:=strings.TrimSpace(response.Header.Get("x-amz-meta-clouddeck-sha256"))
+ if !strings.EqualFold(remoteSHA,expectedSHA){return errors.New("S3 restore object checksum metadata mismatch")}
+ file,err:=os.OpenFile(destination,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+ if err!=nil{return errors.New("unable to create S3 restore staging file")}
+ ok:=false
+ defer func(){_ = file.Close();if !ok{_ = os.Remove(destination)}}()
+ hash:=sha256.New()
+ limited:=&countingWriter{writer:io.MultiWriter(file,hash),limit:backupMaxBytes()}
+ if _,err:=io.Copy(limited,response.Body);err!=nil{return errors.New("S3 restore download could not be stored")}
+ if err:=file.Sync();err!=nil{return errors.New("S3 restore staging file could not be synced")}
+ if err:=file.Close();err!=nil{return errors.New("S3 restore staging file could not be closed")}
+ actual:=hex.EncodeToString(hash.Sum(nil))
+ if !strings.EqualFold(actual,expectedSHA){return errors.New("S3 restore object checksum mismatch")}
+ ok=true
+ return nil
+}
 func deleteS3Backup(ctx context.Context,config s3BackupConfig,objectKey string)error{
  if err:=validateS3BackupConfig(&config);err!=nil{return err}
  if err:=validateS3StoredKey(config,objectKey);err!=nil{return err}

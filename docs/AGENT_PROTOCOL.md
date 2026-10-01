@@ -169,3 +169,12 @@ Archives are written under the Agent-controlled `CLOUDDECK_BACKUP_DIR` (default 
 For `targetType: "s3"`, the payload also contains a validated transient S3 configuration: endpoint, region, bucket, access key, secret key, optional session token, and optional object prefix. The Agent creates the archive locally first, verifies it, uploads with a signed PUT, and then performs a signed HEAD. The HEAD must return the exact archive size and the same SHA-256 stored in `x-amz-meta-clouddeck-sha256` before the command can return `verified:true`.
 
 `backup.deleteS3` accepts only a previously persisted object key plus the structured S3 target configuration. The object key must end in the UUID-derived archive name and remain under the configured prefix. The action exposes no list/read/copy operation and does not accept arbitrary bucket changes or shell text.
+
+
+### Typed database restore
+
+`backup.restoreDatabase` accepts only a backup UUID, database kind/name, recorded target type/storage key, expected SHA-256, and the structured database/S3 credentials needed for that single restore. The API builds the payload from a successful verified backup row; the browser cannot choose a filesystem path, S3 key, target database, or command arguments.
+
+For local targets the storage key must equal `<backup-id>.tar.gz`. For S3 targets the key must end with the same UUID-derived filename and remain inside the configured object prefix. The Agent verifies the full archive checksum before extracting only `dump/database.dump` (PostgreSQL) or `dump/database.sql` (MySQL).
+
+PostgreSQL restores use fixed `pg_restore` arguments with clean/if-exists and exit-on-error behavior. MySQL restores use the fixed `mysql` client with the dump on stdin. Neither path invokes a shell or accepts arbitrary SQL from the API.

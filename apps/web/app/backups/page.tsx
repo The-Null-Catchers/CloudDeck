@@ -3,7 +3,7 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {
-  Activity,ArrowLeft,CheckCircle2,DatabaseBackup,HardDrive,History,Play,Plus,RefreshCw,ShieldCheck,Trash2,TriangleAlert
+  Activity,ArrowLeft,CheckCircle2,DatabaseBackup,HardDrive,History,Play,Plus,RefreshCw,RotateCcw,ShieldCheck,Trash2,TriangleAlert
 } from 'lucide-react';
 import {api} from '@/lib/api';
 
@@ -29,6 +29,8 @@ type BackupRow={
   id:string;job_id:string;status:'pending'|'running'|'verifying'|'successful'|'failed';size_bytes:number|null;
   verified_at:string|null;started_at:string|null;finished_at:string|null;storage_key:string|null;sha256:string|null;
   error:string|null;manifest:{entryCount?:number;verification?:string};created_at:string;
+  latest_restore_id:string|null;latest_restore_status:'running'|'successful'|'failed'|null;latest_restore_started_at:string|null;
+  latest_restore_finished_at:string|null;latest_restore_error:string|null;
 };
 type Form={name:string;serverId:string;kind:BackupKind;source:string;sourceSecretId:string;retentionCount:string;schedule:BackupSchedule;targetType:'local'|'s3';targetSecretId:string};
 
@@ -189,6 +191,18 @@ export default function BackupsPage(){
     finally{setBusy(null)}
   }
 
+  async function restore(job:BackupJob,item:BackupRow){
+    if(!canManage||job.server_status!=='online'||(job.kind!=='postgres'&&job.kind!=='mysql')||item.status!=='successful')return;
+    const warning=`Restore backup from ${when(item.created_at)} into ${job.kind==='postgres'?'PostgreSQL':'MySQL'} database "${job.source}"? Existing database objects/data may be replaced. This operation is audited and cannot be undone by CloudDeck.`;
+    if(!confirm(warning))return;
+    setBusy(`restore:${item.id}`);setError('');
+    try{
+      await api(`/backups/${item.id}/restore`,{method:'POST',body:JSON.stringify({confirm:true})});
+      await loadHistory(job.id);
+    }catch(e){setError(e instanceof Error?e.message:'Backup restore failed')}
+    finally{setBusy(null)}
+  }
+
   async function remove(job:BackupJob){
     if(!canManage||!confirm(`Delete backup job "${job.name}" and its stored ${job.target_type==="s3"?"S3 objects":"local archives"}? This cannot be undone.`))return;
     setBusy(`delete:${job.id}`);setError('');
@@ -280,7 +294,7 @@ export default function BackupsPage(){
       </form>}
 
       <section className="deploy-section">
-        <div className="deploy-section-head"><div><h2>Backup jobs</h2><p>Success means the Agent closed, synced, re-opened, and fully read the archive before verification was persisted.</p></div><span>{jobs.length} configured</span></div>
+        <div className="deploy-section-head"><div><h2>Backup jobs</h2><p>Success means the Agent verified the archive before persistence. Verified PostgreSQL/MySQL history rows can be restored with an explicit destructive-action confirmation.</p></div><span>{jobs.length} configured</span></div>
         <div className="backup-list">
           {jobs.map(job=><article className="backup-card" key={job.id}>
             <div className="backup-main">
@@ -303,7 +317,8 @@ export default function BackupsPage(){
                 <strong>{bytes(item.size_bytes)}</strong>
                 <span>{when(item.created_at)}</span>
                 <code>{item.sha256?item.sha256.slice(0,16)+'…':'—'}</code>
-                <small>{item.status==='successful'?`${item.manifest?.entryCount??0} entries · verified`:item.error??'In progress'}</small>
+                <small>{item.status==='successful'?`${item.manifest?.entryCount??0} entries · verified`:item.error??'In progress'}{item.latest_restore_status?` · restore ${item.latest_restore_status}`:''}</small>
+                {canManage&&(job.kind==='postgres'||job.kind==='mysql')&&item.status==='successful'&&<button className="compact" title="Restore this database backup" onClick={()=>void restore(job,item)} disabled={busy!==null||job.server_status!=='online'||item.latest_restore_status==='running'}><RotateCcw size={14}/>{busy===`restore:${item.id}`?'Restoring…':'Restore'}</button>}
               </div>)}
               {!history[job.id]?.length&&<div className="deployment-empty">No backup runs yet.</div>}
             </div>}
