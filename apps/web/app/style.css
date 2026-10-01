@@ -98,3 +98,10 @@
   .backup-history-row{grid-template-columns:1fr 1fr}
   .backup-history-row code,.backup-history-row small{grid-column:1 / -1}
 }
+
+.backup-credentials { margin-top: 1.25rem; }
+.backup-credentials fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 1rem; min-width: 0; }
+.backup-credentials p { font-size: .85rem; color: var(--muted); line-height: 1.6; }
+.backup-credentials legend { padding: 0 .5rem; font-weight: 600; }
+
+.backup-credentials > p button { border: 1px solid var(--line); background: var(--paper); color: var(--blue); border-radius: 7px; padding: .5rem .7rem; font-size: .8rem; font-weight: 600; }

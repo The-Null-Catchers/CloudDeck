@@ -1,6 +1,6 @@
 'use client';
 
-import {useEffect,useMemo,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {
   Activity,ArrowLeft,CheckCircle2,DatabaseBackup,HardDrive,History,Play,Plus,RefreshCw,ShieldCheck,Trash2,TriangleAlert
@@ -9,8 +9,14 @@ import {api} from '@/lib/api';
 
 type Org={id:string;name:string;role:string};
 type ServerRow={id:string;name:string;hostname:string|null;status:'online'|'offline'|'pending'};
+type BackupKind='directory'|'docker_volume'|'postgres'|'mysql';
+type BackupSecret={id:string;name:string;kind:string};
+type Credentials={name:string;host:string;port:string;username:string;password:string;sslMode:'disable'|'require'};
+const emptyCredentials:Credentials={name:'',host:'',port:'5432',username:'',password:'',sslMode:'require'};
+const sourceLabels:Record<BackupKind,string>={directory:'Directory',docker_volume:'Docker volume',postgres:'PostgreSQL',mysql:'MySQL'};
+
 type BackupJob={
-  id:string;organization_id:string;server_id:string;name:string;kind:'directory'|'docker_volume';source:string;
+  id:string;organization_id:string;server_id:string;name:string;kind:BackupKind;source:string;source_secret_id:string|null;
   schedule:string;retention_count:number;target_type:'local';enabled:boolean;server_name:string;server_status:string;
   latest_backup_id:string|null;latest_backup_status:'running'|'successful'|'failed'|null;latest_backup_size:number|null;
   latest_verified_at:string|null;latest_backup_created_at:string|null;
@@ -20,9 +26,9 @@ type BackupRow={
   verified_at:string|null;started_at:string|null;finished_at:string|null;storage_key:string|null;sha256:string|null;
   error:string|null;manifest:{entryCount?:number;verification?:string};created_at:string;
 };
-type Form={name:string;serverId:string;kind:'directory'|'docker_volume';source:string;retentionCount:string};
+type Form={name:string;serverId:string;kind:BackupKind;source:string;sourceSecretId:string;retentionCount:string};
 
-const emptyForm:Form={name:'',serverId:'',kind:'directory',source:'',retentionCount:'7'};
+const emptyForm:Form={name:'',serverId:'',kind:'directory',source:'',sourceSecretId:'',retentionCount:'7'};
 
 function when(value:string|null){return value?new Date(value).toLocaleString():'Never'}
 function bytes(value:number|null){
@@ -35,8 +41,12 @@ function bytes(value:number|null){
 
 export default function BackupsPage(){
   const router=useRouter();
+  const credentialFields=useRef<HTMLFieldSetElement>(null);
   const [org,setOrg]=useState<Org|null>(null);
   const [servers,setServers]=useState<ServerRow[]>([]);
+  const [secrets,setSecrets]=useState<BackupSecret[]>([]);
+  const [credentials,setCredentials]=useState<Credentials>(emptyCredentials);
+  const [showCredentials,setShowCredentials]=useState(false);
   const [jobs,setJobs]=useState<BackupJob[]>([]);
   const [history,setHistory]=useState<Record<string,BackupRow[]>>({});
   const [expanded,setExpanded]=useState<string|null>(null);
@@ -47,6 +57,7 @@ export default function BackupsPage(){
   const [error,setError]=useState('');
 
   const canManage=org?.role==='owner'||org?.role==='admin';
+  const isDatabase=form.kind==='postgres'||form.kind==='mysql';
 
   async function load(silent=false){
     if(!silent)setLoading(true);
@@ -54,11 +65,12 @@ export default function BackupsPage(){
       const orgs=await api<{organizations:Org[]}>('/organizations');
       const selected=orgs.organizations[0];
       if(!selected)throw new Error('No workspace found');
-      const [jobData,serverData]=await Promise.all([
+      const [jobData,serverData,secretData]=await Promise.all([
         api<{jobs:BackupJob[]}>(`/organizations/${selected.id}/backup-jobs`),
-        api<{servers:ServerRow[]}>(`/organizations/${selected.id}/servers`)
+        api<{servers:ServerRow[]}>(`/organizations/${selected.id}/servers`),
+        api<{secrets:BackupSecret[]}>(`/organizations/${selected.id}/secrets`)
       ]);
-      setOrg(selected);setJobs(jobData.jobs);setServers(serverData.servers);setError('');
+      setOrg(selected);setJobs(jobData.jobs);setServers(serverData.servers);setSecrets(secretData.secrets.filter(item=>item.kind==='backup'));setError('');
       setForm(current=>current.serverId||!serverData.servers.length?current:{...current,serverId:serverData.servers[0].id});
     }catch(e){setError(e instanceof Error?e.message:'Unable to load backups')}
     finally{if(!silent)setLoading(false)}
@@ -68,7 +80,7 @@ export default function BackupsPage(){
 
   async function createJob(event:React.FormEvent){
     event.preventDefault();
-    if(!org||!canManage)return;
+    if(!org||!canManage||busy!==null||showCredentials||(isDatabase&&!form.sourceSecretId))return;
     setBusy('create');setError('');
     try{
       await api(`/organizations/${org.id}/backup-jobs`,{
@@ -78,11 +90,44 @@ export default function BackupsPage(){
           serverId:form.serverId,
           kind:form.kind,
           source:form.source.trim(),
+          ...(isDatabase?{sourceSecretId:form.sourceSecretId}:{}),
           retentionCount:Number(form.retentionCount)
         })
       });
-      setShowCreate(false);setForm(current=>({...emptyForm,serverId:current.serverId}));await load(true);
+      closeCreate();await load(true);
     }catch(e){setError(e instanceof Error?e.message:'Unable to create backup job')}
+    finally{setBusy(null)}
+  }
+
+  function closeCreate(){
+    setShowCreate(false);setShowCredentials(false);setCredentials(emptyCredentials);setForm(current=>({...emptyForm,serverId:current.serverId}));
+  }
+
+  function changeKind(kind:BackupKind){
+    setForm(current=>({...current,kind,source:'',sourceSecretId:''}));
+    setCredentials({...emptyCredentials,port:kind==='mysql'?'3306':'5432'});
+    setShowCredentials(false);
+  }
+
+  async function saveCredentials(){
+    if(!org||!canManage||!isDatabase)return;
+    const fields=credentialFields.current?.querySelectorAll('input,select');
+    if(fields&&[...fields].some(field=>!(field as HTMLInputElement).reportValidity()))return;
+    if(/\s/.test(credentials.username)||[...credentials.username].some(c=>c.charCodeAt(0)<32||c.charCodeAt(0)===127)||[...credentials.password].some(c=>[0,10,13].includes(c.charCodeAt(0)))){
+      setError('Username cannot contain whitespace or control characters. Password cannot contain line breaks or NUL.');return;
+    }
+    setBusy('credentials');setError('');
+    try{
+      const secret=await api<BackupSecret>(`/organizations/${org.id}/secrets`,{
+        method:'POST',body:JSON.stringify({name:credentials.name.trim(),kind:'backup',value:JSON.stringify({
+          host:credentials.host.trim(),port:Number(credentials.port),username:credentials.username,
+          password:credentials.password,sslMode:credentials.sslMode
+        })})
+      });
+      setSecrets(current=>[...current,secret]);
+      setForm(current=>({...current,sourceSecretId:secret.id}));
+      setCredentials({...emptyCredentials,port:form.kind==='mysql'?'3306':'5432'});setShowCredentials(false);
+    }catch(e){setError(e instanceof Error?e.message:'Unable to save database credentials')}
     finally{setBusy(null)}
   }
 
@@ -134,8 +179,8 @@ export default function BackupsPage(){
 
     <main className="deploy-content">
       <section className="deploy-hero">
-        <div><span className="eyebrow">OPERATIONS / BACKUPS</span><h1>Verified backups</h1><p>Create Agent-verified local backups for allowlisted directories and Docker volumes.</p></div>
-        <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button>{canManage&&<button className="primary" onClick={()=>setShowCreate(value=>!value)}><Plus size={15}/> New backup job</button>}</div>
+        <div><span className="eyebrow">OPERATIONS / BACKUPS</span><h1>Verified backups</h1><p>Create Agent-verified local backups for allowlisted directories, Docker volumes, PostgreSQL, and MySQL.</p></div>
+        <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading||busy!==null}><RefreshCw size={15}/> Refresh</button>{canManage&&<button className="primary" onClick={()=>showCreate?closeCreate():setShowCreate(true)} disabled={busy!==null}><Plus size={15}/> New backup job</button>}</div>
       </section>
 
       {error&&<div className="notice" role="status">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
@@ -148,15 +193,32 @@ export default function BackupsPage(){
       </section>
 
       {showCreate&&canManage&&<form className="deploy-section backup-form" onSubmit={createJob}>
-        <div className="deploy-section-head"><div><h2>Create local backup job</h2><p>Directory paths are accepted by the Agent only when they resolve under its configured backup source allowlist.</p></div></div>
+        <div className="deploy-section-head"><div><h2>Create local backup job</h2><p>Choose a source on the managed server. Database jobs use encrypted connection credentials and store only a reference to the secret.</p></div></div>
         <div className="domain-form-grid">
           <label>Name<input required maxLength={120} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Production uploads"/></label>
           <label>Server<select required value={form.serverId} onChange={e=>setForm({...form,serverId:e.target.value})}><option value="">Choose server</option>{servers.map(item=><option key={item.id} value={item.id}>{item.name} · {item.status}</option>)}</select></label>
-          <label>Source type<select value={form.kind} onChange={e=>setForm({...form,kind:e.target.value as Form['kind'],source:''})}><option value="directory">Directory</option><option value="docker_volume">Docker volume</option></select></label>
-          <label>{form.kind==='directory'?'Absolute directory':'Docker volume name'}<input required value={form.source} onChange={e=>setForm({...form,source:e.target.value})} placeholder={form.kind==='directory'?'/srv/app/uploads':'postgres-data'}/></label>
+          <label>Source type<select disabled={busy!==null} value={form.kind} onChange={e=>changeKind(e.target.value as BackupKind)}><option value="directory">Directory</option><option value="docker_volume">Docker volume</option><option value="postgres">PostgreSQL</option><option value="mysql">MySQL</option></select></label>
+          <label>{isDatabase?'Database name':form.kind==='directory'?'Absolute directory':'Docker volume name'}<input required value={form.source} onChange={e=>setForm({...form,source:e.target.value})} maxLength={isDatabase?128:500} pattern={isDatabase?String.raw`[A-Za-z0-9_][A-Za-z0-9_.\-]*`:undefined} placeholder={isDatabase?'appdb':form.kind==='directory'?'/srv/app/uploads':'app-data'}/></label>
+          {isDatabase&&<label>Connection secret<select required value={form.sourceSecretId} onChange={e=>setForm({...form,sourceSecretId:e.target.value})}><option value="">Choose encrypted credentials</option>{secrets.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
           <label>Retention count<input required type="number" min={1} max={100} value={form.retentionCount} onChange={e=>setForm({...form,retentionCount:e.target.value})}/></label>
         </div>
-        <div className="domain-form-actions"><button type="button" onClick={()=>setShowCreate(false)}>Cancel</button><button className="primary" disabled={busy==='create'||!servers.length}>{busy==='create'?'Creating…':'Create job'}</button></div>
+        {isDatabase&&<div className="backup-credentials">
+          <p>Use a backup secret containing host, port, username, password, and SSL mode. <button type="button" disabled={busy!==null} onClick={()=>{setShowCredentials(value=>!value);setCredentials({...emptyCredentials,port:form.kind==='mysql'?'3306':'5432'})}}>{showCredentials?'Cancel new credentials':'Add connection credentials'}</button></p>
+          {showCredentials&&<fieldset ref={credentialFields} disabled={busy!==null}>
+            <legend>New encrypted database connection</legend>
+            <div className="domain-form-grid">
+              <label>Secret name<input required maxLength={120} pattern={String.raw`[A-Za-z0-9][A-Za-z0-9_.:\-]*`} value={credentials.name} onChange={e=>setCredentials({...credentials,name:e.target.value})} placeholder="production-db-backup"/></label>
+              <label>Host<input required maxLength={253} pattern={String.raw`[A-Za-z0-9_.:\-]+`} value={credentials.host} onChange={e=>setCredentials({...credentials,host:e.target.value})} placeholder="db.internal"/></label>
+              <label>Port<input required type="number" min={1} max={65535} step={1} value={credentials.port} onChange={e=>setCredentials({...credentials,port:e.target.value})}/></label>
+              <label>Username<input required maxLength={128} autoComplete="off" value={credentials.username} onChange={e=>setCredentials({...credentials,username:e.target.value})}/></label>
+              <label>Password<input required type="password" autoComplete="new-password" maxLength={4096} value={credentials.password} onChange={e=>setCredentials({...credentials,password:e.target.value})}/></label>
+              <label>SSL mode<select value={credentials.sslMode} onChange={e=>setCredentials({...credentials,sslMode:e.target.value as Credentials['sslMode']})}><option value="require">Require SSL</option><option value="disable">Disable SSL</option></select></label>
+            </div>
+            <p>Credentials are encrypted when saved. The server needs pg_dump and pg_restore for PostgreSQL, or mysqldump for MySQL.</p>
+            <button type="button" className="primary" disabled={busy!==null||!credentials.name.trim()||!credentials.host.trim()||!credentials.username||!credentials.password||!Number.isInteger(Number(credentials.port))||Number(credentials.port)<1||Number(credentials.port)>65535} onClick={()=>void saveCredentials()}>{busy==='credentials'?'Encrypting…':'Save encrypted credentials'}</button>
+          </fieldset>}
+        </div>}
+        <div className="domain-form-actions"><button type="button" onClick={closeCreate} disabled={busy!==null}>Cancel</button><button className="primary" disabled={busy!==null||!servers.length||(isDatabase&&(!form.sourceSecretId||showCredentials))}>{busy==='create'?'Creating…':'Create job'}</button></div>
       </form>}
 
       <section className="deploy-section">
@@ -165,16 +227,16 @@ export default function BackupsPage(){
           {jobs.map(job=><article className="backup-card" key={job.id}>
             <div className="backup-main">
               <span className="backup-icon">{job.kind==='docker_volume'?<HardDrive size={18}/>:<DatabaseBackup size={18}/>}</span>
-              <div className="backup-copy"><strong>{job.name}</strong><small>{job.server_name} · {job.kind.replace('_',' ')} · {job.source}</small><em>Retention {job.retention_count} · local target</em></div>
+              <div className="backup-copy"><strong>{job.name}</strong><small>{job.server_name} · {sourceLabels[job.kind]} · {job.source}</small><em>Retention {job.retention_count} · local target</em></div>
               <div className="backup-latest">
                 <span className={`health-state ${job.latest_backup_status==='successful'?'healthy':job.latest_backup_status==='failed'?'warning':'pending'}`}>{job.latest_backup_status??'never run'}</span>
                 <strong>{bytes(job.latest_backup_size)}</strong>
                 <small>{job.latest_verified_at?`Verified ${when(job.latest_verified_at)}`:job.latest_backup_created_at?when(job.latest_backup_created_at):'No backups yet'}</small>
               </div>
               <div className="backup-actions">
-                <button title="View history" onClick={()=>expanded===job.id?setExpanded(null):void loadHistory(job.id)} disabled={busy===`history:${job.id}`}><History size={15}/></button>
-                {canManage&&<button className="primary compact" title="Run backup now" onClick={()=>void run(job)} disabled={busy===`run:${job.id}`||job.server_status!=='online'}><Play size={14}/>{busy===`run:${job.id}`?'Running…':'Run now'}</button>}
-                {canManage&&<button className="danger" title="Delete backup job" onClick={()=>void remove(job)} disabled={busy===`delete:${job.id}`}><Trash2 size={15}/></button>}
+                <button title="View history" onClick={()=>expanded===job.id?setExpanded(null):void loadHistory(job.id)} disabled={busy!==null}><History size={15}/></button>
+                {canManage&&<button className="primary compact" title="Run backup now" onClick={()=>void run(job)} disabled={busy!==null||job.latest_backup_status==='running'||job.server_status!=='online'}><Play size={14}/>{busy===`run:${job.id}`?'Running…':'Run now'}</button>}
+                {canManage&&<button className="danger" title="Delete backup job" onClick={()=>void remove(job)} disabled={busy!==null||job.latest_backup_status==='running'}><Trash2 size={15}/></button>}
               </div>
             </div>
             {expanded===job.id&&<div className="backup-history">
