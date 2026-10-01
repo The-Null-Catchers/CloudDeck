@@ -110,6 +110,9 @@ export async function executeBackupJob(jobId:string,trigger:BackupTrigger){
   let created:{id:string;job_id:string;status:string;started_at:string;created_at:string};
   try{
     created=await transaction(async db=>{
+      await db.query('SELECT id FROM backup_jobs WHERE id=$1 FOR UPDATE',[jobId]);
+      const restoring=await db.query("SELECT id FROM backup_restores WHERE job_id=$1 AND status='running' LIMIT 1",[jobId]);
+      if(restoring.rowCount)throw Object.assign(new Error('Backup job is currently restoring'),{statusCode:409});
       const result=await db.query(
         `INSERT INTO backups(job_id,status,started_at,triggered_by)
          VALUES($1,'running',now(),$2)
@@ -235,8 +238,15 @@ export async function backupRoutes(app:FastifyInstance){
     const job=await backupJob(jobId);
     await membership(userId,job.organization_id,'backup.read');
     const result=await pool.query(
-      `SELECT id,job_id,status,size_bytes,verified_at,started_at,finished_at,storage_key,sha256,error,manifest,triggered_by,created_at
-       FROM backups WHERE job_id=$1 ORDER BY created_at DESC LIMIT 100`,
+      `SELECT b.id,b.job_id,b.status,b.size_bytes,b.verified_at,b.started_at,b.finished_at,b.storage_key,b.sha256,b.error,b.manifest,b.triggered_by,b.created_at,
+              restore.id AS latest_restore_id,restore.status AS latest_restore_status,restore.started_at AS latest_restore_started_at,
+              restore.finished_at AS latest_restore_finished_at,restore.error AS latest_restore_error
+       FROM backups b
+       LEFT JOIN LATERAL (
+         SELECT id,status,started_at,finished_at,error
+         FROM backup_restores WHERE backup_id=b.id ORDER BY created_at DESC LIMIT 1
+       ) restore ON true
+       WHERE b.job_id=$1 ORDER BY b.created_at DESC LIMIT 100`,
       [jobId]
     );
     return {backups:result.rows};
@@ -299,6 +309,115 @@ export async function backupRoutes(app:FastifyInstance){
     const completed=await executeBackupJob(jobId,{actorId:userId,ip:request.ip,trigger:'manual'});
     reply.code(201);
     return completed;
+  });
+
+  app.post('/backups/:backupId/restore',async (request,reply)=>{
+    const {userId}=await authenticate(request);
+    const {backupId}=z.object({backupId:uuid}).parse(request.params);
+    z.object({confirm:z.literal(true)}).strict().parse(request.body);
+    const result=await pool.query(
+      `SELECT b.id,b.status,b.verified_at,b.storage_key,b.sha256,b.job_id,
+              j.organization_id,j.server_id,j.kind,j.source,j.source_secret_id,j.target_type,j.target_secret_id,j.enabled,
+              s.status AS server_status
+       FROM backups b
+       JOIN backup_jobs j ON j.id=b.job_id
+       JOIN servers s ON s.id=j.server_id
+       WHERE b.id=$1`,
+      [backupId]
+    );
+    if(!result.rowCount)throw Object.assign(new Error('Backup not found'),{statusCode:404});
+    const item=result.rows[0];
+    await membership(userId,item.organization_id,'backup.manage');
+    if(item.status!=='successful'||!item.verified_at||!item.storage_key||!item.sha256)throw Object.assign(new Error('Only verified successful backups can be restored'),{statusCode:409});
+    if(item.kind!=='postgres'&&item.kind!=='mysql')throw Object.assign(new Error('Filesystem restore is not available in this restore slice'),{statusCode:409});
+    if(item.server_status!=='online')throw Object.assign(new Error('Backup server is offline'),{statusCode:503});
+
+    let restore:{id:string;status:string;started_at:string;created_at:string};
+    try{
+      restore=await transaction(async db=>{
+        await db.query('SELECT id FROM backup_jobs WHERE id=$1 FOR UPDATE',[item.job_id]);
+        const runningBackup=await db.query("SELECT id FROM backups WHERE job_id=$1 AND status='running' LIMIT 1",[item.job_id]);
+        if(runningBackup.rowCount)throw Object.assign(new Error('Backup job is currently running'),{statusCode:409});
+        const created=await db.query(
+          `INSERT INTO backup_restores(backup_id,job_id,status,requested_by)
+           VALUES($1,$2,'running',$3)
+           RETURNING id,status,started_at,created_at`,
+          [backupId,item.job_id,userId]
+        );
+        await audit(item.organization_id,userId,'backup.restore.requested','backup_restore',created.rows[0].id,request.ip,{
+          backupId,jobId:item.job_id,kind:item.kind,targetType:item.target_type,serverId:item.server_id
+        },db);
+        return created.rows[0];
+      });
+    }catch(error){
+      if((error as {code?:string})?.code==='23505')throw Object.assign(new Error('Backup job already has a restore in progress'),{statusCode:409});
+      throw error;
+    }
+
+    try{
+      if(!item.source_secret_id)throw new Error('Database backup source secret is missing');
+      let database:z.infer<typeof databaseSecret>;
+      let plaintext='';
+      try{
+        plaintext=await readSecretValueForService(item.source_secret_id,item.organization_id);
+        database=parseDatabaseBackupSecret(plaintext);
+      }finally{
+        plaintext='';
+      }
+
+      let s3:z.infer<typeof s3Secret>|undefined;
+      if(item.target_type==='s3'){
+        if(!item.target_secret_id)throw new Error('S3 backup target secret is missing');
+        let targetPlaintext='';
+        try{
+          targetPlaintext=await readSecretValueForService(item.target_secret_id,item.organization_id);
+          s3=parseS3BackupSecret(targetPlaintext);
+        }finally{
+          targetPlaintext='';
+        }
+      }
+
+      const raw=await sendAgentCommand(item.server_id,'backup.restoreDatabase',{
+        backupId:item.id,
+        kind:item.kind,
+        databaseName:item.source,
+        targetType:item.target_type,
+        storageKey:item.storage_key,
+        expectedSha256:item.sha256,
+        database,
+        s3
+      },30*60_000);
+      const restored=z.object({restored:z.literal(true)}).strict().parse(raw);
+      void restored;
+      const completed=await transaction(async db=>{
+        const updated=await db.query(
+          `UPDATE backup_restores SET status='successful',finished_at=now(),error=NULL
+           WHERE id=$1 AND status='running'
+           RETURNING id,backup_id,job_id,status,started_at,finished_at,error,requested_by,created_at`,
+          [restore.id]
+        );
+        if(!updated.rowCount)throw new Error('Restore state changed unexpectedly');
+        await audit(item.organization_id,userId,'backup.restore.completed','backup_restore',restore.id,request.ip,{
+          backupId,jobId:item.job_id,kind:item.kind,targetType:item.target_type
+        },db);
+        return updated.rows[0];
+      });
+      reply.code(201);
+      return completed;
+    }catch(error){
+      const message=(error instanceof Error?error.message:'Restore failed').slice(0,500);
+      await transaction(async db=>{
+        await db.query(
+          `UPDATE backup_restores SET status='failed',error=$2,finished_at=now()
+           WHERE id=$1 AND status='running'`,
+          [restore.id,message]
+        );
+        await audit(item.organization_id,userId,'backup.restore.failed','backup_restore',restore.id,request.ip,{
+          backupId,jobId:item.job_id,kind:item.kind,error:message
+        },db);
+      });
+      throw Object.assign(new Error(message),{statusCode:(error as {statusCode?:number})?.statusCode??502});
+    }
   });
 
   app.delete('/backup-jobs/:jobId',async request=>{
