@@ -23,6 +23,7 @@ import {alertRoutes} from './alerts.js';
 import {domainRoutes} from './domains.js';
 import {secretRoutes} from './secrets.js';
 import {backupRoutes} from './backups.js';
+import {startBackupRunner} from './backup-runner.js';
 import {startDomainTlsRunner} from './domain-runner.js';
 import {startHealthCheckRunner} from './health-runner.js';
 import {startDeploymentQueueReconciler,closeDeploymentQueue} from './deployment-queue.js';
@@ -80,12 +81,14 @@ if (process.env.NODE_ENV !== 'test') {
   const stopDomainTlsRunner=startDomainTlsRunner();
   const stopNotificationQueueReconciler=startNotificationQueueReconciler();
   startNotificationWorker();
+  const stopBackupRunner=startBackupRunner();
   app.addHook('onClose',async()=>{
     stopSweep();
     stopDeploymentQueueReconciler();
     stopHealthCheckRunner();
     stopDomainTlsRunner();
     stopNotificationQueueReconciler();
+    stopBackupRunner();
     await closeNotificationWorker();
     await closeNotificationQueue();
     await closeDeploymentWorker();

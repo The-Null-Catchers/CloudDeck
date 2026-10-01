@@ -11,13 +11,15 @@ type Org={id:string;name:string;role:string};
 type ServerRow={id:string;name:string;hostname:string|null;status:'online'|'offline'|'pending'};
 type BackupKind='directory'|'docker_volume'|'postgres'|'mysql';
 type BackupSecret={id:string;name:string;kind:string};
+type BackupSchedule='manual'|'hourly'|'daily'|'weekly';
 type Credentials={name:string;host:string;port:string;username:string;password:string;sslMode:'disable'|'require'};
 const emptyCredentials:Credentials={name:'',host:'',port:'5432',username:'',password:'',sslMode:'require'};
 const sourceLabels:Record<BackupKind,string>={directory:'Directory',docker_volume:'Docker volume',postgres:'PostgreSQL',mysql:'MySQL'};
 
 type BackupJob={
   id:string;organization_id:string;server_id:string;name:string;kind:BackupKind;source:string;source_secret_id:string|null;
-  schedule:string;retention_count:number;target_type:'local';enabled:boolean;server_name:string;server_status:string;
+  schedule:BackupSchedule;retention_count:number;target_type:'local';enabled:boolean;server_name:string;server_status:string;
+  next_run_at:string|null;last_scheduled_at:string|null;
   latest_backup_id:string|null;latest_backup_status:'running'|'successful'|'failed'|null;latest_backup_size:number|null;
   latest_verified_at:string|null;latest_backup_created_at:string|null;
 };
@@ -26,9 +28,9 @@ type BackupRow={
   verified_at:string|null;started_at:string|null;finished_at:string|null;storage_key:string|null;sha256:string|null;
   error:string|null;manifest:{entryCount?:number;verification?:string};created_at:string;
 };
-type Form={name:string;serverId:string;kind:BackupKind;source:string;sourceSecretId:string;retentionCount:string};
+type Form={name:string;serverId:string;kind:BackupKind;source:string;sourceSecretId:string;retentionCount:string;schedule:BackupSchedule};
 
-const emptyForm:Form={name:'',serverId:'',kind:'directory',source:'',sourceSecretId:'',retentionCount:'7'};
+const emptyForm:Form={name:'',serverId:'',kind:'directory',source:'',sourceSecretId:'',retentionCount:'7',schedule:'manual'};
 
 function when(value:string|null){return value?new Date(value).toLocaleString():'Never'}
 function bytes(value:number|null){
@@ -91,7 +93,8 @@ export default function BackupsPage(){
           kind:form.kind,
           source:form.source.trim(),
           ...(isDatabase?{sourceSecretId:form.sourceSecretId}:{}),
-          retentionCount:Number(form.retentionCount)
+          retentionCount:Number(form.retentionCount),
+          schedule:form.schedule
         })
       });
       closeCreate();await load(true);
@@ -179,7 +182,7 @@ export default function BackupsPage(){
 
     <main className="deploy-content">
       <section className="deploy-hero">
-        <div><span className="eyebrow">OPERATIONS / BACKUPS</span><h1>Verified backups</h1><p>Create Agent-verified local backups for allowlisted directories, Docker volumes, PostgreSQL, and MySQL.</p></div>
+        <div><span className="eyebrow">OPERATIONS / BACKUPS</span><h1>Verified backups</h1><p>Create Agent-verified local backups for allowlisted directories, Docker volumes, PostgreSQL, and MySQL, with safe recurring schedules.</p></div>
         <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading||busy!==null}><RefreshCw size={15}/> Refresh</button>{canManage&&<button className="primary" onClick={()=>showCreate?closeCreate():setShowCreate(true)} disabled={busy!==null}><Plus size={15}/> New backup job</button>}</div>
       </section>
 
@@ -201,6 +204,7 @@ export default function BackupsPage(){
           <label>{isDatabase?'Database name':form.kind==='directory'?'Absolute directory':'Docker volume name'}<input required value={form.source} onChange={e=>setForm({...form,source:e.target.value})} maxLength={isDatabase?128:500} pattern={isDatabase?String.raw`[A-Za-z0-9_][A-Za-z0-9_.\-]*`:undefined} placeholder={isDatabase?'appdb':form.kind==='directory'?'/srv/app/uploads':'app-data'}/></label>
           {isDatabase&&<label>Connection secret<select required value={form.sourceSecretId} onChange={e=>setForm({...form,sourceSecretId:e.target.value})}><option value="">Choose encrypted credentials</option>{secrets.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
           <label>Retention count<input required type="number" min={1} max={100} value={form.retentionCount} onChange={e=>setForm({...form,retentionCount:e.target.value})}/></label>
+          <label>Schedule<select value={form.schedule} onChange={e=>setForm({...form,schedule:e.target.value as BackupSchedule})}><option value="manual">Manual only</option><option value="hourly">Hourly</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
         </div>
         {isDatabase&&<div className="backup-credentials">
           <p>Use a backup secret containing host, port, username, password, and SSL mode. <button type="button" disabled={busy!==null} onClick={()=>{setShowCredentials(value=>!value);setCredentials({...emptyCredentials,port:form.kind==='mysql'?'3306':'5432'})}}>{showCredentials?'Cancel new credentials':'Add connection credentials'}</button></p>
@@ -227,7 +231,7 @@ export default function BackupsPage(){
           {jobs.map(job=><article className="backup-card" key={job.id}>
             <div className="backup-main">
               <span className="backup-icon">{job.kind==='docker_volume'?<HardDrive size={18}/>:<DatabaseBackup size={18}/>}</span>
-              <div className="backup-copy"><strong>{job.name}</strong><small>{job.server_name} · {sourceLabels[job.kind]} · {job.source}</small><em>Retention {job.retention_count} · local target</em></div>
+              <div className="backup-copy"><strong>{job.name}</strong><small>{job.server_name} · {sourceLabels[job.kind]} · {job.source}</small><em>Retention {job.retention_count} · local target · {job.schedule==='manual'?'manual':job.schedule}{job.next_run_at?` · next ${when(job.next_run_at)}`:''}</em></div>
               <div className="backup-latest">
                 <span className={`health-state ${job.latest_backup_status==='successful'?'healthy':job.latest_backup_status==='failed'?'warning':'pending'}`}>{job.latest_backup_status??'never run'}</span>
                 <strong>{bytes(job.latest_backup_size)}</strong>
