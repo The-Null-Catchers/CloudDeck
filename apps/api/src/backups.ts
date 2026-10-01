@@ -75,21 +75,24 @@ export async function executeBackupJob(jobId:string,trigger:BackupTrigger){
   if(!job.enabled)throw Object.assign(new Error('Backup job is disabled'),{statusCode:409});
   if(job.server_status!=='online')throw Object.assign(new Error('Backup server is offline'),{statusCode:503});
 
-  const running=await pool.query("SELECT id FROM backups WHERE job_id=$1 AND status='running' LIMIT 1",[jobId]);
-  if(running.rowCount)throw Object.assign(new Error('Backup job is already running'),{statusCode:409});
-
-  const created=await transaction(async db=>{
-    const result=await db.query(
-      `INSERT INTO backups(job_id,status,started_at,triggered_by)
-       VALUES($1,'running',now(),$2)
-       RETURNING id,job_id,status,started_at,created_at`,
-      [jobId,trigger.actorId]
-    );
-    await audit(job.organization_id,trigger.actorId,'backup.run.requested','backup',result.rows[0].id,trigger.ip,{
-      jobId,kind:job.kind,serverId:job.server_id,targetType:job.target_type,trigger:trigger.trigger
-    },db);
-    return result.rows[0];
-  });
+  let created:{id:string;job_id:string;status:string;started_at:string;created_at:string};
+  try{
+    created=await transaction(async db=>{
+      const result=await db.query(
+        `INSERT INTO backups(job_id,status,started_at,triggered_by)
+         VALUES($1,'running',now(),$2)
+         RETURNING id,job_id,status,started_at,created_at`,
+        [jobId,trigger.actorId]
+      );
+      await audit(job.organization_id,trigger.actorId,'backup.run.requested','backup',result.rows[0].id,trigger.ip,{
+        jobId,kind:job.kind,serverId:job.server_id,targetType:job.target_type,trigger:trigger.trigger
+      },db);
+      return result.rows[0];
+    });
+  }catch(error){
+    if((error as {code?:string})?.code==='23505')throw Object.assign(new Error('Backup job is already running'),{statusCode:409});
+    throw error;
+  }
 
   try{
     let database:z.infer<typeof databaseSecret>|undefined;
