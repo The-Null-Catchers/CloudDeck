@@ -18,6 +18,11 @@ if [ ! -d android ]; then
     .
 fi
 
+# flutter create may add its sample counter test while recreating platform files.
+# CloudDeck has its own tests; remove only the generated sample.
+rm -f test/widget_test.dart
+rm -rf .idea clouddeck_mobile.iml android/clouddeck_mobile_android.iml
+
 mkdir -p android/app/src/main android/app/src/debug
 
 if [ -f android/app/build.gradle.kts ]; then
