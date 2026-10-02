@@ -84,26 +84,26 @@ final class AppState extends ChangeNotifier {
   }
 
   Future<List<MetricPoint>> metrics(String serverId,{String range='24h'}) async {
-    final payload=await api.get('/api/v1/servers/${serverId}/metrics?range=${range}') as Map<String,dynamic>;
+    final payload=await api.get('/api/v1/servers/$serverId/metrics?range=$range') as Map<String,dynamic>;
     return (payload['points'] as List<dynamic>).cast<Map<String,dynamic>>().map(MetricPoint.fromJson).toList(growable:false);
   }
 
   Future<List<ContainerItem>> containers(String serverId) async {
-    final payload=await api.get('/api/v1/servers/${serverId}/docker/containers') as Map<String,dynamic>;
+    final payload=await api.get('/api/v1/servers/$serverId/docker/containers') as Map<String,dynamic>;
     return (payload['containers'] as List<dynamic>).cast<Map<String,dynamic>>().map(ContainerItem.fromJson).toList(growable:false);
   }
 
   Future<List<String>> containerLogs(String serverId,String containerId) async {
-    final payload=await api.get('/api/v1/servers/${serverId}/docker/containers/${containerId}/logs?limit=200') as Map<String,dynamic>;
+    final payload=await api.get('/api/v1/servers/$serverId/docker/containers/$containerId/logs?limit=200') as Map<String,dynamic>;
     return (payload['lines'] as List<dynamic>).cast<String>();
   }
 
   Future<void> restartContainer(String serverId,String containerId) async {
-    await api.post('/api/v1/servers/${serverId}/docker/containers/${containerId}/action',body:{'action':'restart','confirm':true});
+    await api.post('/api/v1/servers/$serverId/docker/containers/$containerId/action',body:{'action':'restart','confirm':true});
   }
 
-  Future<void> acknowledgeAlert(String alertId) async {await api.post('/api/v1/alerts/${alertId}/acknowledge');await refreshOverview();}
-  Future<void> markNotificationRead(String notificationId) async {await api.post('/api/v1/notifications/${notificationId}/read');await refreshOverview();}
+  Future<void> acknowledgeAlert(String alertId) async {await api.post('/api/v1/alerts/$alertId/acknowledge');await refreshOverview();}
+  Future<void> markNotificationRead(String notificationId) async {await api.post('/api/v1/notifications/$notificationId/read');await refreshOverview();}
 }
 
 extension<T> on List<T>{T? get firstOrNull=>isEmpty?null:first;}
