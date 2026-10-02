@@ -4,6 +4,7 @@ import {pool,transaction} from './db.js';
 import {authenticate,membership,audit} from './security.js';
 import {normalizeDomainHostname} from './domain-tls.js';
 import {executeDomainTlsCheck} from './domain-runner.js';
+import {sendAgentCommand} from './commands.js';
 
 const uuid=z.uuid();
 const proxyType=z.enum(['caddy','nginx']);
@@ -54,6 +55,96 @@ export function resolveDomainTargetPort(application:{deployment_type:'dockerfile
   return port.parse(requested);
 }
 
+async function managedDomain(domainId:string){
+  const result=await pool.query(
+    `SELECT d.id,d.hostname,d.proxy_type,d.target_port,d.proxy_status,d.proxy_error,
+            a.organization_id,a.server_id,s.status AS server_status
+     FROM domains d
+     JOIN applications a ON a.id=d.application_id
+     LEFT JOIN servers s ON s.id=a.server_id
+     WHERE d.id=$1`,
+    [domainId]
+  );
+  if(!result.rowCount)throw Object.assign(new Error('Domain not found'),{statusCode:404});
+  return result.rows[0] as {
+    id:string;hostname:string;proxy_type:'caddy'|'nginx';target_port:number;
+    proxy_status:'unconfigured'|'applied'|'error';proxy_error:string|null;
+    organization_id:string;server_id:string|null;server_status:string|null;
+  };
+}
+
+function requireOnlineDomainServer(domain:{server_id:string|null;server_status:string|null}){
+  if(!domain.server_id)throw Object.assign(new Error('Domain application is not assigned to a server'),{statusCode:409});
+  if(domain.server_status!=='online')throw Object.assign(new Error('Domain server is offline'),{statusCode:503});
+  return domain.server_id;
+}
+
+async function applyManagedProxy(domain:Awaited<ReturnType<typeof managedDomain>>,userId:string,ip:string){
+  const serverId=requireOnlineDomainServer(domain);
+  try{
+    await sendAgentCommand(serverId,'proxy.applyDomain',{
+      proxyType:domain.proxy_type,
+      hostname:domain.hostname,
+      targetPort:domain.target_port
+    },45_000);
+    const updated=await pool.query(
+      `UPDATE domains
+       SET proxy_status='applied',proxy_error=NULL,proxy_applied_at=now(),updated_at=now()
+       WHERE id=$1
+       RETURNING proxy_status,proxy_error,proxy_applied_at`,
+      [domain.id]
+    );
+    await audit(domain.organization_id,userId,'domain.proxy.apply','domain',domain.id,ip,{
+      hostname:domain.hostname,proxyType:domain.proxy_type,targetPort:domain.target_port,serverId
+    });
+    return updated.rows[0];
+  }catch(error){
+    const message=(error instanceof Error?error.message:'Proxy apply failed').slice(0,500);
+    await pool.query(
+      `UPDATE domains
+       SET proxy_status=CASE WHEN proxy_status='applied' THEN 'applied' ELSE 'error' END,
+           proxy_error=$2,updated_at=now()
+       WHERE id=$1`,
+      [domain.id,message]
+    );
+    await audit(domain.organization_id,userId,'domain.proxy.apply.failed','domain',domain.id,ip,{
+      hostname:domain.hostname,proxyType:domain.proxy_type,error:message
+    });
+    throw Object.assign(new Error(message),{statusCode:(error as {statusCode?:number})?.statusCode??502});
+  }
+}
+
+async function removeManagedProxy(domain:Awaited<ReturnType<typeof managedDomain>>,userId:string,ip:string){
+  const serverId=requireOnlineDomainServer(domain);
+  try{
+    await sendAgentCommand(serverId,'proxy.removeDomain',{
+      proxyType:domain.proxy_type,
+      hostname:domain.hostname
+    },45_000);
+    const updated=await pool.query(
+      `UPDATE domains
+       SET proxy_status='unconfigured',proxy_error=NULL,proxy_applied_at=NULL,updated_at=now()
+       WHERE id=$1
+       RETURNING proxy_status,proxy_error,proxy_applied_at`,
+      [domain.id]
+    );
+    await audit(domain.organization_id,userId,'domain.proxy.remove','domain',domain.id,ip,{
+      hostname:domain.hostname,proxyType:domain.proxy_type,serverId
+    });
+    return updated.rows[0];
+  }catch(error){
+    const message=(error instanceof Error?error.message:'Proxy removal failed').slice(0,500);
+    await pool.query(
+      `UPDATE domains SET proxy_error=$2,updated_at=now() WHERE id=$1`,
+      [domain.id,message]
+    );
+    await audit(domain.organization_id,userId,'domain.proxy.remove.failed','domain',domain.id,ip,{
+      hostname:domain.hostname,proxyType:domain.proxy_type,error:message
+    });
+    throw Object.assign(new Error(message),{statusCode:(error as {statusCode?:number})?.statusCode??502});
+  }
+}
+
 export async function domainRoutes(app:FastifyInstance){
   app.get('/organizations/:orgId/domains',async request=>{
     const {userId}=await authenticate(request);
@@ -62,7 +153,8 @@ export async function domainRoutes(app:FastifyInstance){
     const rows=await pool.query(
       `SELECT d.id,d.application_id,d.hostname,d.proxy_type,d.target_port,d.enabled,d.https_status,
               d.certificate_expires_at,d.certificate_issuer,d.tls_error,d.last_tls_checked_at,d.next_tls_check_at,
-              d.created_at,d.updated_at,a.name AS application_name,a.server_id,s.name AS server_name,s.status AS server_status,
+              d.proxy_status,d.proxy_error,d.proxy_applied_at,d.created_at,d.updated_at,
+              a.name AS application_name,a.server_id,s.name AS server_name,s.status AS server_status,
               alert.id AS alert_id,alert.state AS alert_state
        FROM domains d
        JOIN applications a ON a.id=d.application_id
@@ -90,7 +182,7 @@ export async function domainRoutes(app:FastifyInstance){
         `INSERT INTO domains(application_id,hostname,proxy_type,target_port,enabled,next_tls_check_at)
          VALUES($1,$2,$3,$4,$5,now())
          RETURNING id,application_id,hostname,proxy_type,target_port,enabled,https_status,certificate_expires_at,
-                   certificate_issuer,last_tls_checked_at,next_tls_check_at,created_at`,
+                   certificate_issuer,last_tls_checked_at,next_tls_check_at,proxy_status,proxy_error,proxy_applied_at,created_at`,
         [application.id,hostname,body.proxyType,targetPort,body.enabled]
       );
     }catch(error){
@@ -99,10 +191,7 @@ export async function domainRoutes(app:FastifyInstance){
     }
     const domain=created.rows[0];
     await audit(orgId,userId,'domain.create','domain',domain.id,request.ip,{
-      hostname,
-      proxyType:body.proxyType,
-      targetPort,
-      applicationId:application.id
+      hostname,proxyType:body.proxyType,targetPort,applicationId:application.id
     });
     reply.code(201);
     return domain;
@@ -126,11 +215,18 @@ export async function domainRoutes(app:FastifyInstance){
     const targetPort=body.targetPort===undefined?row.target_port:resolveDomainTargetPort(row,body.targetPort);
     const nextProxyType=body.proxyType??row.proxy_type;
     const enabled=body.enabled??row.enabled;
+    const changesManagedProxy=hostname!==row.hostname||targetPort!==row.target_port||nextProxyType!==row.proxy_type;
+    if(row.proxy_status==='applied'&&changesManagedProxy){
+      throw Object.assign(new Error('Remove the managed proxy configuration before changing hostname, proxy type, or target port'),{statusCode:409});
+    }
     let updated;
     try{
       updated=await pool.query(
         `UPDATE domains
          SET hostname=$2,proxy_type=$3,target_port=$4,enabled=$5,
+             proxy_status=CASE WHEN $6 THEN 'unconfigured' ELSE proxy_status END,
+             proxy_error=CASE WHEN $6 THEN NULL ELSE proxy_error END,
+             proxy_applied_at=CASE WHEN $6 THEN NULL ELSE proxy_applied_at END,
              next_tls_check_at=CASE WHEN $5 THEN now() ELSE next_tls_check_at END,
              https_status=CASE WHEN hostname<>$2 THEN 'unknown' ELSE https_status END,
              certificate_expires_at=CASE WHEN hostname<>$2 THEN NULL ELSE certificate_expires_at END,
@@ -139,19 +235,34 @@ export async function domainRoutes(app:FastifyInstance){
              updated_at=now()
          WHERE id=$1
          RETURNING *`,
-        [domainId,hostname,nextProxyType,targetPort,enabled]
+        [domainId,hostname,nextProxyType,targetPort,enabled,changesManagedProxy]
       );
     }catch(error){
       if((error as {code?:string}).code==='23505')throw Object.assign(new Error('This domain is already attached'),{statusCode:409});
       throw error;
     }
     await audit(row.organization_id,userId,'domain.update','domain',domainId,request.ip,{
-      hostname,
-      proxyType:nextProxyType,
-      targetPort,
-      enabled
+      hostname,proxyType:nextProxyType,targetPort,enabled
     });
     return updated.rows[0];
+  });
+
+  app.post('/domains/:domainId/proxy/apply',async request=>{
+    const {userId}=await authenticate(request);
+    const {domainId}=z.object({domainId:uuid}).parse(request.params);
+    z.object({confirm:z.literal(true)}).strict().parse(request.body);
+    const domain=await managedDomain(domainId);
+    await membership(userId,domain.organization_id,'domain.manage');
+    return applyManagedProxy(domain,userId,request.ip);
+  });
+
+  app.post('/domains/:domainId/proxy/remove',async request=>{
+    const {userId}=await authenticate(request);
+    const {domainId}=z.object({domainId:uuid}).parse(request.params);
+    z.object({confirm:z.literal(true)}).strict().parse(request.body);
+    const domain=await managedDomain(domainId);
+    await membership(userId,domain.organization_id,'domain.manage');
+    return removeManagedProxy(domain,userId,request.ip);
   });
 
   app.post('/domains/:domainId/check',async request=>{
@@ -175,15 +286,9 @@ export async function domainRoutes(app:FastifyInstance){
   app.delete('/domains/:domainId',async request=>{
     const {userId}=await authenticate(request);
     const {domainId}=z.object({domainId:uuid}).parse(request.params);
-    const current=await pool.query(
-      `SELECT d.id,d.hostname,d.proxy_type,a.organization_id
-       FROM domains d JOIN applications a ON a.id=d.application_id
-       WHERE d.id=$1`,
-      [domainId]
-    );
-    if(!current.rowCount)throw Object.assign(new Error('Domain not found'),{statusCode:404});
-    const row=current.rows[0];
-    await membership(userId,row.organization_id,'domain.manage');
+    const domain=await managedDomain(domainId);
+    await membership(userId,domain.organization_id,'domain.manage');
+    if(domain.proxy_status==='applied')await removeManagedProxy(domain,userId,request.ip);
     await transaction(async db=>{
       await db.query(
         `UPDATE alerts
@@ -192,7 +297,9 @@ export async function domainRoutes(app:FastifyInstance){
         [domainId]
       );
       await db.query('DELETE FROM domains WHERE id=$1',[domainId]);
-      await audit(row.organization_id,userId,'domain.delete','domain',domainId,request.ip,{hostname:row.hostname,proxyType:row.proxy_type},db);
+      await audit(domain.organization_id,userId,'domain.delete','domain',domainId,request.ip,{
+        hostname:domain.hostname,proxyType:domain.proxy_type
+      },db);
     });
     return {ok:true};
   });
