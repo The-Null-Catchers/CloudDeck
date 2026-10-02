@@ -4,11 +4,13 @@ import { z } from 'zod';
 import { pool, transaction } from './db.js';
 import { sendChallenge } from './mail.js';
 import { accessToken, authenticate, audit, digest, randomToken } from './security.js';
+import {beginTwoFactorChallenge,completeTwoFactorChallenge} from './two-factor.js';
 const credentials = z.object({email: z.email().max(320).transform(v => v.toLowerCase()),password: z.string().min(12).max(256)});
 const emailSchema = z.object({email: z.email().max(320).transform(v => v.toLowerCase())});
 const tokenSchema = z.object({token: z.string().min(20)});
 const mobileCredentials=credentials.extend({deviceName:z.string().trim().min(1).max(120).optional()});
 const mobileRefresh=z.object({refreshToken:z.string().min(20)}).strict();
+const twoFactorComplete=z.object({challengeToken:z.string().min(20),code:z.string().trim().min(6).max(32)}).strict();
 const refreshOptions = {httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' as const, path: '/api/v1/auth', maxAge: 60*60*24*30};
 function setRefresh(reply: FastifyReply, value: string) { reply.setCookie('clouddeck_refresh', value, refreshOptions); }
 async function createSession(userId:string){
@@ -54,21 +56,48 @@ export async function authRoutes(app: FastifyInstance) {
   });
   app.post('/login', {config:{rateLimit:{max:5,timeWindow:'1 minute'}}}, async (request,reply) => {
     const input = credentials.parse(request.body);
-    const result = await pool.query('SELECT id,password_hash FROM users WHERE email=$1', [input.email]);
+    const result = await pool.query('SELECT id,password_hash,totp_enabled_at FROM users WHERE email=$1', [input.email]);
     const valid = result.rowCount ? await argon2.verify(result.rows[0].password_hash,input.password) : false;
     if (!valid) throw Object.assign(new Error('Invalid credentials'), {statusCode:401});
+    if(result.rows[0].totp_enabled_at){
+      const challengeToken=await beginTwoFactorChallenge(result.rows[0].id,'web');
+      await audit(null,result.rows[0].id,'auth.2fa.challenge','user',result.rows[0].id,request.ip,{clientType:'web'});
+      reply.code(202);
+      return {twoFactorRequired:true,challengeToken,expiresIn:300};
+    }
     await audit(null,result.rows[0].id,'auth.login','user',result.rows[0].id,request.ip);
     return issue(result.rows[0].id,reply);
   });
   app.post('/mobile/login',{config:{rateLimit:{max:5,timeWindow:'1 minute'}}},async request=>{
     const input=mobileCredentials.parse(request.body);
-    const result=await pool.query('SELECT id,password_hash FROM users WHERE email=$1',[input.email]);
+    const result=await pool.query('SELECT id,password_hash,totp_enabled_at FROM users WHERE email=$1',[input.email]);
     const valid=result.rowCount?await argon2.verify(result.rows[0].password_hash,input.password):false;
     if(!valid)throw Object.assign(new Error('Invalid credentials'),{statusCode:401});
+    if(result.rows[0].totp_enabled_at){
+      const challengeToken=await beginTwoFactorChallenge(result.rows[0].id,'mobile');
+      await audit(null,result.rows[0].id,'auth.2fa.challenge','user',result.rows[0].id,request.ip,{
+        clientType:'mobile',deviceName:input.deviceName??null
+      });
+      return {twoFactorRequired:true,challengeToken,expiresIn:300};
+    }
     await audit(null,result.rows[0].id,'auth.mobile.login','user',result.rows[0].id,request.ip,{
       deviceName:input.deviceName??null
     });
     return issueMobile(result.rows[0].id);
+  });
+
+  app.post('/2fa/complete',{config:{rateLimit:{max:10,timeWindow:'1 minute'}}},async (request,reply)=>{
+    const body=twoFactorComplete.parse(request.body);
+    const verified=await completeTwoFactorChallenge(body.challengeToken,body.code,'web');
+    await audit(null,verified.userId,'auth.login.2fa','user',verified.userId,request.ip,{usedRecovery:verified.usedRecovery});
+    return issue(verified.userId,reply);
+  });
+
+  app.post('/mobile/2fa/complete',{config:{rateLimit:{max:10,timeWindow:'1 minute'}}},async request=>{
+    const body=twoFactorComplete.parse(request.body);
+    const verified=await completeTwoFactorChallenge(body.challengeToken,body.code,'mobile');
+    await audit(null,verified.userId,'auth.mobile.login.2fa','user',verified.userId,request.ip,{usedRecovery:verified.usedRecovery});
+    return issueMobile(verified.userId);
   });
 
   app.post('/mobile/refresh',async request=>{

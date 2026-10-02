@@ -10,7 +10,7 @@ RBAC: viewers can read inventory, metrics and logs; operators can perform approv
 
 Realtime Docker/systemd log streams use one-time tickets and are forwarded in memory without log persistence. Browser terminal sessions also use one-time tickets, a dedicated `terminal.access` permission, PTYs, a 30-minute hard timeout, and start/stop audit records. Terminal contents are not stored.
 
-Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, encrypted backup payloads, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
+Known production blockers remain: agent credential rotation UI, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, encrypted backup payloads, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
 
 
 ## Health-check SSRF boundary
@@ -114,3 +114,16 @@ The helper constructs configuration from fixed templates. It never accepts raw C
 Caddy configuration is written only to `/etc/caddy/clouddeck.d/<hostname>.caddy` and is refused unless the main Caddyfile explicitly imports that directory. Nginx configuration is written only to `/etc/nginx/conf.d/clouddeck-<hostname>.conf`; apply additionally requires `nginx -T` to prove that file is loaded by the active configuration.
 
 Before reload, the helper snapshots the previous CloudDeck fragment, performs an atomic replacement/removal, validates the complete proxy config, and reloads only `caddy` or `nginx` through a fixed absolute `systemctl` path. Any validation or reload failure restores the prior fragment and attempts recovery reload. The root helper service itself uses systemd filesystem and kernel hardening and has no network address family beyond AF_UNIX.
+
+
+## TOTP two-factor authentication
+
+TOTP is optional per user and is enforced before any web or native mobile session is issued. A correct password for an enabled account creates only a short-lived five-minute two-factor challenge; it does not create an access token, refresh cookie, or native refresh token.
+
+Authenticator secrets are generated server-side from 160 bits of randomness and encrypted with the same AES-256-GCM key boundary used by CloudDeck secret storage. Unconfirmed setup secrets can be replaced by starting setup again. Setup requires current-password reauthentication before a new secret is returned.
+
+CloudDeck accepts RFC 6238-style SHA-1 TOTP codes with six digits, a 30-second period, and a one-step clock window in either direction. Challenge completion is rate-limited and bound to the originating client type so a mobile challenge cannot be exchanged through the web completion route or vice versa.
+
+Enabling TOTP generates ten one-time recovery codes. Only SHA-256 hashes of normalized codes are stored. A recovery code is consumed atomically inside the same transaction that completes a challenge, so concurrent reuse cannot succeed. Recovery-code regeneration and TOTP disable both require the current password plus a valid TOTP or unused recovery code.
+
+Disabling TOTP revokes all other active sessions and invalidates outstanding two-factor challenges. Audit entries record setup start, enable, challenge creation, successful factor-backed login, recovery-code replacement, disable, and failed proxy-independent authentication events without storing secrets or factor codes.

@@ -35,7 +35,7 @@ final class ApiClient {
 
   bool get authenticated => _accessToken != null;
 
-  Future<Map<String, dynamic>> login({
+  Future<String?> login({
     required String email,
     required String password,
     required String deviceName,
@@ -49,8 +49,22 @@ final class ApiClient {
         'deviceName': deviceName,
       },
     );
+    if(response['twoFactorRequired']==true){
+      final challenge=response['challengeToken'];
+      if(challenge is! String)throw ApiException('Invalid two-factor challenge');
+      return challenge;
+    }
     await _acceptSession(response);
-    return response;
+    return null;
+  }
+
+  Future<void> completeTwoFactorLogin(String challengeToken,String code) async {
+    final response=await _raw(
+      'POST',
+      '/api/v1/auth/mobile/2fa/complete',
+      body:{'challengeToken':challengeToken,'code':code.trim()},
+    );
+    await _acceptSession(response);
   }
 
   Future<bool> restoreSession() async {

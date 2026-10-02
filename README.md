@@ -7,7 +7,7 @@ CloudDeck is a multi-server operations and observability platform that combines 
 ## Implemented
 
 - Next.js responsive dashboard with demo servers, authentication flows, workspace inventory, server onboarding, server detail metrics, and Docker controls.
-- Fastify API with PostgreSQL migrations, Argon2id passwords, short-lived JWTs, rotating/revocable refresh cookies, personal/team workspaces, RBAC, audit logs, session management, verification and reset flows.
+- Fastify API with PostgreSQL migrations, Argon2id passwords, short-lived JWTs, rotating/revocable refresh sessions, optional TOTP two-factor authentication with one-time recovery codes, personal/team workspaces, RBAC, audit logs, verification and reset flows.
 - Go Linux agent with outbound authenticated WebSocket, one-time pairing, heartbeat telemetry, CPU/RAM/disk/load/network metrics, reconnect and protected credential storage.
 - Metric aggregation into one-minute PostgreSQL buckets plus durable hourly rollups for 7/30-day history, configurable raw/hourly retention, and bounded long-range API responses.
 - Docker container inventory and audited restart through typed agent commands.

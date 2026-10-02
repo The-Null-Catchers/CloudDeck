@@ -11,6 +11,7 @@ final class AppState extends ChangeNotifier {
   SessionStatus sessionStatus=SessionStatus.booting;
   bool loading=false;
   String? error;
+  String? twoFactorChallenge;
   Organization? organization;
   List<Organization> organizations=const [];
   DashboardStats stats=const DashboardStats(total:0,online:0,offline:0,openAlerts:0);
@@ -34,18 +35,45 @@ final class AppState extends ChangeNotifier {
   Future<void> login(String email,String password) async {
     loading=true;error=null;notifyListeners();
     try {
-      await api.login(email:email,password:password,deviceName:'${Platform.operatingSystem} CloudDeck');
+      final challenge=await api.login(email:email,password:password,deviceName:'${Platform.operatingSystem} CloudDeck');
+      if(challenge!=null){
+        twoFactorChallenge=challenge;
+        sessionStatus=SessionStatus.signedOut;
+        return;
+      }
+      twoFactorChallenge=null;
       sessionStatus=SessionStatus.signedIn;
       await refreshOverview();
     } on ApiException catch(exception) {error=exception.message;sessionStatus=SessionStatus.signedOut;}
     finally {loading=false;notifyListeners();}
   }
 
+  Future<void> verifyTwoFactor(String code) async {
+    final challenge=twoFactorChallenge;
+    if(challenge==null)return;
+    loading=true;error=null;notifyListeners();
+    try{
+      await api.completeTwoFactorLogin(challenge,code);
+      twoFactorChallenge=null;
+      sessionStatus=SessionStatus.signedIn;
+      await refreshOverview();
+    } on ApiException catch(exception){
+      error=exception.message;
+      sessionStatus=SessionStatus.signedOut;
+    } finally {loading=false;notifyListeners();}
+  }
+
+  void cancelTwoFactor(){
+    twoFactorChallenge=null;
+    error=null;
+    notifyListeners();
+  }
+
   Future<void> logout() async {
     loading=true;notifyListeners();
     try {await api.logout();}
     finally {
-      sessionStatus=SessionStatus.signedOut;organization=null;organizations=const [];servers=const [];
+      sessionStatus=SessionStatus.signedOut;twoFactorChallenge=null;organization=null;organizations=const [];servers=const [];
       alerts=const [];deployments=const [];notifications=const [];loading=false;notifyListeners();
     }
   }
