@@ -147,7 +147,9 @@ func mutate(ctx context.Context,body requestBody,remove bool)error{
  }
  if err:=reload(ctx,body.ProxyType);err!=nil{
   restoreSnapshot(path,previous,existed)
-  _=reload(context.Background(),body.ProxyType)
+  recoveryCtx,cancel:=context.WithTimeout(context.Background(),30*time.Second)
+  _=reload(recoveryCtx,body.ProxyType)
+  cancel()
   return err
  }
  return nil
