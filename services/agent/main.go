@@ -147,6 +147,10 @@ func connect(endpoint,credential string) error {
      go executeFilesystemRestoreCommand(ctx,command,write)
      continue
     }
+    if command.Action=="proxy.applyDomain"||command.Action=="proxy.removeDomain"{
+     go func(current agentCommand){_ = write(executeProxyCommand(ctx,current))}(command)
+     continue
+    }
     if command.Action=="deployment.execute"{
      go executeDeploymentCommand(ctx,command,write)
      continue
