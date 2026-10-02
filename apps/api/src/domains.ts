@@ -79,7 +79,24 @@ function requireOnlineDomainServer(domain:{server_id:string|null;server_status:s
   return domain.server_id;
 }
 
-async function applyManagedProxy(domain:Awaited<ReturnType<typeof managedDomain>>,userId:string,ip:string){
+async function withDomainProxyLock<T>(domainId:string,work:()=>Promise<T>){
+  const client=await pool.connect();
+  let locked=false;
+  try{
+    const result=await client.query('SELECT pg_try_advisory_lock(hashtextextended($1,0)) AS locked',[domainId]);
+    locked=result.rows[0]?.locked===true;
+    if(!locked)throw Object.assign(new Error('Another proxy operation is already running for this domain'),{statusCode:409});
+    return await work();
+  }finally{
+    if(locked){
+      try{await client.query('SELECT pg_advisory_unlock(hashtextextended($1,0))',[domainId])}
+      catch{void 0}
+    }
+    client.release();
+  }
+}
+
+async function applyManagedProxyUnlocked(domain:Awaited<ReturnType<typeof managedDomain>>,userId:string,ip:string){
   const serverId=requireOnlineDomainServer(domain);
   try{
     await sendAgentCommand(serverId,'proxy.applyDomain',{
@@ -114,7 +131,7 @@ async function applyManagedProxy(domain:Awaited<ReturnType<typeof managedDomain>
   }
 }
 
-async function removeManagedProxy(domain:Awaited<ReturnType<typeof managedDomain>>,userId:string,ip:string){
+async function removeManagedProxyUnlocked(domain:Awaited<ReturnType<typeof managedDomain>>,userId:string,ip:string){
   const serverId=requireOnlineDomainServer(domain);
   try{
     await sendAgentCommand(serverId,'proxy.removeDomain',{
@@ -253,7 +270,7 @@ export async function domainRoutes(app:FastifyInstance){
     z.object({confirm:z.literal(true)}).strict().parse(request.body);
     const domain=await managedDomain(domainId);
     await membership(userId,domain.organization_id,'domain.manage');
-    return applyManagedProxy(domain,userId,request.ip);
+    return withDomainProxyLock(domain.id,()=>applyManagedProxyUnlocked(domain,userId,request.ip));
   });
 
   app.post('/domains/:domainId/proxy/remove',async request=>{
@@ -262,7 +279,7 @@ export async function domainRoutes(app:FastifyInstance){
     z.object({confirm:z.literal(true)}).strict().parse(request.body);
     const domain=await managedDomain(domainId);
     await membership(userId,domain.organization_id,'domain.manage');
-    return removeManagedProxy(domain,userId,request.ip);
+    return withDomainProxyLock(domain.id,()=>removeManagedProxyUnlocked(domain,userId,request.ip));
   });
 
   app.post('/domains/:domainId/check',async request=>{
@@ -288,19 +305,22 @@ export async function domainRoutes(app:FastifyInstance){
     const {domainId}=z.object({domainId:uuid}).parse(request.params);
     const domain=await managedDomain(domainId);
     await membership(userId,domain.organization_id,'domain.manage');
-    if(domain.proxy_status==='applied')await removeManagedProxy(domain,userId,request.ip);
-    await transaction(async db=>{
-      await db.query(
-        `UPDATE alerts
-         SET state='resolved',resolved_at=COALESCE(resolved_at,now())
-         WHERE domain_id=$1 AND state IN ('open','acknowledged')`,
-        [domainId]
-      );
-      await db.query('DELETE FROM domains WHERE id=$1',[domainId]);
-      await audit(domain.organization_id,userId,'domain.delete','domain',domainId,request.ip,{
-        hostname:domain.hostname,proxyType:domain.proxy_type
-      },db);
+    return withDomainProxyLock(domain.id,async()=>{
+      const latest=await managedDomain(domain.id);
+      if(latest.proxy_status==='applied')await removeManagedProxyUnlocked(latest,userId,request.ip);
+      await transaction(async db=>{
+        await db.query(
+          `UPDATE alerts
+           SET state='resolved',resolved_at=COALESCE(resolved_at,now())
+           WHERE domain_id=$1 AND state IN ('open','acknowledged')`,
+          [domainId]
+        );
+        await db.query('DELETE FROM domains WHERE id=$1',[domainId]);
+        await audit(domain.organization_id,userId,'domain.delete','domain',domainId,request.ip,{
+          hostname:domain.hostname,proxyType:domain.proxy_type
+        },db);
+      });
+      return {ok:true};
     });
-    return {ok:true};
   });
 }
