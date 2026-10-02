@@ -73,7 +73,7 @@ async function verifyFactorWithDb(
   return {usedRecovery:true};
 }
 
-export async function completeTwoFactorChallenge(challengeToken:string,code:string){
+export async function completeTwoFactorChallenge(challengeToken:string,code:string,expectedClientType:'web'|'mobile'){
   return transaction(async db=>{
     const challenge=await db.query(
       `SELECT id,user_id,client_type
@@ -84,6 +84,7 @@ export async function completeTwoFactorChallenge(challengeToken:string,code:stri
     );
     if(!challenge.rowCount)throw Object.assign(new Error('Invalid or expired two-factor challenge'),{statusCode:401});
     const row=challenge.rows[0] as {id:string;user_id:string;client_type:'web'|'mobile'};
+    if(row.client_type!==expectedClientType)throw Object.assign(new Error('Invalid two-factor challenge'),{statusCode:401});
     const verification=await verifyFactorWithDb(db,row.user_id,code);
     await db.query('UPDATE two_factor_challenges SET consumed_at=now() WHERE id=$1',[row.id]);
     return {userId:row.user_id,clientType:row.client_type,...verification};
