@@ -32,4 +32,14 @@ flutter run --dart-define=CLOUDDECK_API_URL=https://api.example.com
 
 The default API URL is `http://10.0.2.2:4000` for Android emulator local development.
 
-Platform-specific Android/iOS runner projects and release signing are added in the next release slice. Never embed production API secrets or refresh tokens in build-time configuration.
+Android runner files are reproducibly generated with:
+
+```bash
+./tool/bootstrap_android.sh
+```
+
+The Android application ID is `org.clouddeck.mobile`. The generated release manifest disallows cleartext HTTP. Debug builds override cleartext only for local emulator/development use.
+
+CI builds a release-mode smoke APK against a non-routable HTTPS placeholder API and keeps it as a short-lived GitHub Actions artifact. That artifact is **not store-signed** and must not be distributed as a production release. Store signing credentials belong in CI secret storage and are added in a later release-signing slice.
+
+Never embed production API secrets or refresh tokens in build-time configuration.
