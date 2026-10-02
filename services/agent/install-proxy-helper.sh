@@ -19,6 +19,7 @@ fi
 install -m 0755 "$CLOUDDECK_PROXY_HELPER_BIN" /usr/local/bin/clouddeck-proxy-helper
 install -d -o root -g root -m 0755 /etc/clouddeck-proxy-helper
 install -d -o root -g root -m 0755 /etc/caddy/clouddeck.d
+install -d -o root -g root -m 0755 /etc/nginx/conf.d
 
 cat > /etc/systemd/system/clouddeck-proxy-helper.service <<'UNIT'
 [Unit]
