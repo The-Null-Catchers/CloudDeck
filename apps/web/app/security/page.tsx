@@ -101,6 +101,7 @@ export default function SecurityPage(){
           <strong>Authenticator secret</strong>
           <code>{setup.secret}</code>
           <button type="button" onClick={()=>void copy(setup.secret)}><Copy size={14}/> Copy secret</button>
+          <button type="button" onClick={()=>void copy(setup.otpauthUri)}><Copy size={14}/> Copy authenticator URI</button>
         </div>
         <div className="domain-form-grid">
           <label className="secret-wide">One-time code<input required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={e=>setCode(e.target.value)} placeholder="123456"/></label>
