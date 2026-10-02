@@ -14,6 +14,7 @@ import {
 
 const factorCode=z.string().trim().min(6).max(32);
 const verifyBody=z.object({code:factorCode}).strict();
+const passwordBody=z.object({password:z.string().min(12).max(256)}).strict();
 const protectedAction=z.object({
   password:z.string().min(12).max(256),
   code:factorCode
@@ -129,8 +130,10 @@ export async function twoFactorRoutes(app:FastifyInstance){
 
   app.post('/auth/2fa/setup',async request=>{
     const {userId}=await authenticate(request);
-    const user=await pool.query('SELECT email,totp_enabled_at FROM users WHERE id=$1',[userId]);
+    const {password}=passwordBody.parse(request.body);
+    const user=await pool.query('SELECT email,password_hash,totp_enabled_at FROM users WHERE id=$1',[userId]);
     if(!user.rowCount)throw Object.assign(new Error('User not found'),{statusCode:404});
+    if(!await argon2.verify(user.rows[0].password_hash,password))throw Object.assign(new Error('Invalid credentials'),{statusCode:401});
     if(user.rows[0].totp_enabled_at)throw Object.assign(new Error('Two-factor authentication is already enabled'),{statusCode:409});
     const secret=generateTotpSecret();
     const encrypted=encryptSecretValue(secret);
