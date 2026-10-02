@@ -2,10 +2,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { pool, transaction } from './db.js';
 import { authenticate, membership, audit, randomToken, digest } from './security.js';
+import {queryServerMetrics} from './metrics-retention.js';
 const id = z.uuid();
 const create = z.object({organizationId:id,name:z.string().trim().min(1).max(100),provider:z.string().max(80).optional(),region:z.string().max(80).optional(),tags:z.array(z.string().max(40)).max(20).default([])});
 const metricQuery = z.object({range:z.enum(['1h','6h','24h','7d','30d']).default('24h')});
-const ranges = {'1h':'1 hour','6h':'6 hours','24h':'24 hours','7d':'7 days','30d':'30 days'};
 export async function serverRoutes(app: FastifyInstance) {
   app.get('/organizations', async request => {
     const {userId} = await authenticate(request);
@@ -65,8 +65,7 @@ export async function serverRoutes(app: FastifyInstance) {
     const server = await pool.query('SELECT organization_id FROM servers WHERE id=$1',[serverId]);
     if (!server.rowCount) throw Object.assign(new Error('Server not found'),{statusCode:404});
     await membership(userId,server.rows[0].organization_id,'metrics.read');
-    const result = await pool.query(`SELECT bucket_at,cpu_percent,memory_percent,disk_percent,load_1,network_rx_bytes,network_tx_bytes FROM server_metrics WHERE server_id=$1 AND bucket_at > now()-$2::interval ORDER BY bucket_at ASC LIMIT 43200`,[serverId,ranges[range]]);
-    return {points:result.rows};
+    return queryServerMetrics(serverId,range);
   });
   app.get('/notifications', async request => {
     const {userId}=await authenticate(request);const result=await pool.query('SELECT id,type,title,body,href,read_at,created_at,alert_id FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100',[userId]);return {notifications:result.rows};

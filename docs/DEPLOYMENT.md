@@ -304,3 +304,19 @@ import /etc/caddy/clouddeck.d/*
 CloudDeck will refuse a Caddy apply until the import is present. For Nginx, CloudDeck validates with `nginx -t` and confirms the generated file appears in `nginx -T`.
 
 The Agent connects to the helper at `/run/clouddeck-proxy-helper/helper.sock` by default. A different absolute socket can be supplied to both services with `CLOUDDECK_PROXY_HELPER_SOCKET`, but production deployments should keep the default unless the systemd sandbox is adjusted accordingly.
+
+
+## Metrics retention
+
+CloudDeck keeps minute-level metrics for recent troubleshooting and hourly rollups for long-range charts.
+
+Optional environment variables:
+
+```env
+METRICS_RAW_RETENTION_HOURS=48
+METRICS_HOURLY_RETENTION_DAYS=90
+```
+
+Raw retention is constrained to 24–168 hours. Hourly retention is constrained to 30–365 days. Invalid or out-of-range values fall back to the defaults.
+
+The API runs the rollup every ten minutes. Completed hours are upserted before raw rows become eligible for deletion, so a delayed/crashed runner does not create a historical gap merely because the retention cutoff passed.
