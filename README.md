@@ -9,7 +9,7 @@ CloudDeck is a multi-server operations and observability platform that combines 
 - Next.js responsive dashboard with demo servers, authentication flows, workspace inventory, server onboarding, server detail metrics, and Docker controls.
 - Fastify API with PostgreSQL migrations, Argon2id passwords, short-lived JWTs, rotating/revocable refresh cookies, personal/team workspaces, RBAC, audit logs, session management, verification and reset flows.
 - Go Linux agent with outbound authenticated WebSocket, one-time pairing, heartbeat telemetry, CPU/RAM/disk/load/network metrics, reconnect and protected credential storage.
-- Metric aggregation into one-minute PostgreSQL buckets instead of persisting every realtime event.
+- Metric aggregation into one-minute PostgreSQL buckets plus durable hourly rollups for 7/30-day history, configurable raw/hourly retention, and bounded long-range API responses.
 - Docker container inventory and audited restart through typed agent commands.
 - systemd service inventory plus audited start/stop/restart actions. Unit names are strictly validated and no shell command endpoint exists.
 - Bounded systemd journal snapshots plus realtime Docker/systemd log subscriptions using one-time WebSocket tickets, cancellation, and capped in-memory UI buffers.
@@ -94,7 +94,7 @@ See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [arc
 ## Roadmap
 
 1. Foundation: auth, organizations, database, dashboard — functional baseline.
-2. Agent: pairing, heartbeat, telemetry, metric aggregation — functional baseline; distributed connection routing still pending.
+2. Agent: pairing, heartbeat, telemetry, one-minute aggregation, hourly downsampling/retention — functional baseline; distributed connection routing still pending.
 3. Operations: Docker lifecycle/inspection, Compose service controls, systemd management, bounded snapshots, and realtime Docker/systemd logs — functional baseline.
 4. Browser terminal — dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, a 30-minute limit, and xterm.js server-detail UI with automatic fitting/resize.
 5. Deployments — guarded state machine/read APIs, verified GitHub App linking, installation-scoped repository/branch discovery, and validated Application source configuration implemented; next: BullMQ execution, health activation, and rollback orchestration.
