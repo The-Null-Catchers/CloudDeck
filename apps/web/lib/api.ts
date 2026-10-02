@@ -14,10 +14,26 @@ export async function api<T>(path:string, init:RequestInit={}):Promise<T> {
   if (!response.ok) throw new Error((await response.json()).error?.message ?? 'Request failed');
   return response.json();
 }
-export async function login(email:string,password:string) {
+export type LoginResult=
+  | {twoFactorRequired:false}
+  | {twoFactorRequired:true;challengeToken:string;expiresIn:number};
+
+export async function login(email:string,password:string):Promise<LoginResult> {
   const response=await fetch(`${base}/api/v1/auth/login`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
-  if (!response.ok) throw new Error((await response.json()).error?.message ?? 'Login failed');
-  accessToken=(await response.json()).accessToken;
+  const body=await response.json();
+  if (!response.ok && response.status!==202) throw new Error(body.error?.message ?? 'Login failed');
+  if(response.status===202){
+    return {twoFactorRequired:true,challengeToken:body.challengeToken,expiresIn:body.expiresIn};
+  }
+  accessToken=body.accessToken;
+  return {twoFactorRequired:false};
+}
+
+export async function completeTwoFactorLogin(challengeToken:string,code:string){
+  const response=await fetch(`${base}/api/v1/auth/2fa/complete`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({challengeToken,code})});
+  const body=await response.json();
+  if(!response.ok)throw new Error(body.error?.message??'Two-factor verification failed');
+  accessToken=body.accessToken;
 }
 export async function register(email:string,password:string) {
   const response=await fetch(`${base}/api/v1/auth/register`,{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
