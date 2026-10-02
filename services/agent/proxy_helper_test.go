@@ -1,10 +1,10 @@
 package main
 
 import (
+ "context"
  "encoding/json"
  "net"
  "net/http"
- "os"
  "path/filepath"
  "testing"
 )
@@ -29,7 +29,7 @@ func TestProxyAgentBridgeUsesUnixSocketAndTypedPayload(t *testing.T){
   Type:"command",RequestID:"proxy-1",Action:"proxy.applyDomain",
   Payload:json.RawMessage(`{"proxyType":"caddy","hostname":"api.example.com","targetPort":4000}`),
  }
- result:=executeProxyCommand(t.Context(),command)
+ result:=executeProxyCommand(context.Background(),command)
  if !result.Success{t.Fatalf("proxy command failed: %s",result.Error)}
  payload:=<-received
  if payload.Hostname!="api.example.com"||payload.ProxyType!="caddy"||payload.TargetPort!=4000{t.Fatalf("unexpected helper payload: %+v",payload)}
@@ -43,15 +43,13 @@ func TestProxyAgentBridgeRejectsUnexpectedOrUnsafeInput(t *testing.T){
   {Type:"command",RequestID:"3",Action:"proxy.removeDomain",Payload:json.RawMessage(`{"proxyType":"nginx","hostname":"api.example.com","targetPort":80}`)},
  }
  for _,command:=range cases{
-  result:=executeProxyCommand(t.Context(),command)
+  result:=executeProxyCommand(context.Background(),command)
   if result.Success{t.Fatalf("unsafe proxy payload accepted: %s",string(command.Payload))}
  }
 }
 
 func TestProxyHelperSocketMustBeAbsolute(t *testing.T){
- old,had:=os.LookupEnv("CLOUDDECK_PROXY_HELPER_SOCKET")
  t.Setenv("CLOUDDECK_PROXY_HELPER_SOCKET","relative.sock")
  _,_,err:=proxyHelperClient()
  if err==nil{t.Fatal("expected relative helper socket to be rejected")}
- if had{_ = os.Setenv("CLOUDDECK_PROXY_HELPER_SOCKET",old)}
 }
