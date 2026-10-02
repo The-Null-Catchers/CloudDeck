@@ -101,3 +101,16 @@ Before any live mutation, the Agent verifies SHA-256 over the complete archive a
 Activation preserves the current target with a same-filesystem rename and then renames the fully extracted staging tree into place. A failed activation automatically renames the preserved original back. This gives a narrow rollback boundary without copying live data through the API.
 
 Docker-volume restore is stricter: only named local-driver volumes are eligible, their resolved mountpoint must stay under the trusted Docker volume root, and restoration is refused while any Docker container references the volume. CloudDeck does not stop containers implicitly for a restore.
+
+
+## Reverse-proxy privileged boundary
+
+The main CloudDeck Agent remains unprivileged and cannot write under `/etc` or gain privilege because its service keeps `NoNewPrivileges=true`. Proxy management is opt-in and uses a separate root-owned `clouddeck-proxy-helper` service reached through a Unix socket owned by `root:clouddeck` with mode `0660`.
+
+The Agent exposes only two typed actions: `proxy.applyDomain` and `proxy.removeDomain`. Hostnames must be normalized lowercase DNS names; proxy type is limited to Caddy or Nginx; target ports are bounded to 1–65535. Remove requests cannot contain a target port. Unknown JSON fields are rejected on both the Agent and helper sides.
+
+The helper constructs configuration from fixed templates. It never accepts raw Caddy/Nginx text, arbitrary file paths, service names, executable names from API payloads, shell commands, or environment-variable assignments. Generated routes proxy only to `127.0.0.1:<validated-port>`.
+
+Caddy configuration is written only to `/etc/caddy/clouddeck.d/<hostname>.caddy` and is refused unless the main Caddyfile explicitly imports that directory. Nginx configuration is written only to `/etc/nginx/conf.d/clouddeck-<hostname>.conf`; apply additionally requires `nginx -T` to prove that file is loaded by the active configuration.
+
+Before reload, the helper snapshots the previous CloudDeck fragment, performs an atomic replacement/removal, validates the complete proxy config, and reloads only `caddy` or `nginx` through a fixed absolute `systemctl` path. Any validation or reload failure restores the prior fragment and attempts recovery reload. The root helper service itself uses systemd filesystem and kernel hardening and has no network address family beyond AF_UNIX.

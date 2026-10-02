@@ -15,7 +15,7 @@ CloudDeck is a multi-server operations and observability platform that combines 
 - Bounded systemd journal snapshots plus realtime Docker/systemd log subscriptions using one-time WebSocket tickets, cancellation, and capped in-memory UI buffers.
 - Docker Compose local stack and GitHub Actions checks for Node and Go.
 - Deployment lifecycle state machine with guarded transitions, event history, lifecycle timestamps, RBAC-protected read APIs, and rollback-state support.
-- Domain inventory and distributed TLS certificate monitoring with expiry alerts and SSRF-safe public probing.
+- Domain inventory, distributed TLS certificate monitoring with expiry alerts and SSRF-safe public probing, plus optional least-privilege Caddy/Nginx proxy automation through a separate root helper.
 - Encrypted workspace secret storage using AES-256-GCM, metadata/value separation, no plaintext read API, audited rotation/deletion, and admin/owner management.
 - Verified backups for allowlisted directories, local Docker volumes, PostgreSQL, and MySQL, with local or S3-compatible targets, typed Agent execution, SHA-256 manifests, archive re-read verification, signed S3 post-upload verification, retention cleanup, recurring schedules, encrypted credentials, and confirmed audited PostgreSQL/MySQL/directory/Docker-volume restore workflows.
 
@@ -71,6 +71,24 @@ unset CLOUDDECK_PAIRING_TOKEN
 
 The installer pairs once, saves the long-lived credential in a 0600 file and starts a dedicated systemd service. Docker access is opt-in via `CLOUDDECK_DOCKER_SOCKET=/var/run/docker.sock`; Docker group membership is effectively root-equivalent. systemd service control also requires the local CloudDeck service account to have only the specific sudo/polkit permissions needed in the deployment. Do not grant unrestricted passwordless sudo.
 
+### Optional proxy helper
+
+Managed Caddy/Nginx configuration is intentionally separate from the unprivileged Agent. Build and install the helper only on servers where CloudDeck should manage reverse-proxy fragments:
+
+```bash
+cd services/agent
+go build -o clouddeck-proxy-helper ./proxyhelper
+sudo env CLOUDDECK_PROXY_HELPER_BIN="$PWD/clouddeck-proxy-helper" ./install-proxy-helper.sh
+```
+
+For Caddy, add this import once to the server's main `/etc/caddy/Caddyfile`:
+
+```caddy
+import /etc/caddy/clouddeck.d/*
+```
+
+The helper refuses Caddy changes unless that import exists. Nginx apply verifies the generated `conf.d` file is present in `nginx -T` before reload.
+
 See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [architecture](docs/ARCHITECTURE.md), and [deployment](docs/DEPLOYMENT.md).
 
 ## Roadmap
@@ -81,7 +99,7 @@ See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [arc
 4. Browser terminal — dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, a 30-minute limit, and xterm.js server-detail UI with automatic fitting/resize.
 5. Deployments — guarded state machine/read APIs, verified GitHub App linking, installation-scoped repository/branch discovery, and validated Application source configuration implemented; next: BullMQ execution, health activation, and rollback orchestration.
 6. Health checks, alert rules and email/in-app notifications.
-7. Domains/TLS monitoring, encrypted secrets, verified local/S3-compatible backups, recurring scheduling, and PostgreSQL/MySQL restore are functional; encrypted backup payloads and constrained proxy automation remain.
+7. Domains/TLS monitoring, constrained Caddy/Nginx proxy automation, encrypted secrets, verified local/S3-compatible backups, recurring scheduling, and all supported restore workflows are functional; encrypted backup payloads remain.
 8. Flutter monitoring and emergency-operation mobile app.
 
 No UI or API response claims a pending feature was performed.

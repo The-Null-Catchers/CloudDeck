@@ -273,3 +273,34 @@ Before a queued job transitions to `cloning`, the worker must acquire a PostgreS
 - The lease is deleted in a `finally` path after success, failure, or cancellation. A crashed worker cannot hold the application indefinitely because the lease expires.
 
 This lock is intentionally per application rather than global or per server: applications already have unique runtime targets on a server, so unrelated applications can continue deploying concurrently while the same container/Compose target cannot be raced by two deployments.
+
+
+## Optional Caddy/Nginx proxy helper
+
+Reverse-proxy automation is intentionally not bundled into the Agent's privilege set.
+
+Build both binaries:
+
+```bash
+cd services/agent
+go build -o clouddeck-agent .
+go build -o clouddeck-proxy-helper ./proxyhelper
+```
+
+Install/pair the Agent first, then install the root helper only when managed proxy configuration is wanted:
+
+```bash
+sudo env CLOUDDECK_PROXY_HELPER_BIN="$PWD/clouddeck-proxy-helper" ./install-proxy-helper.sh
+```
+
+The helper runs as its own root systemd service with `NoNewPrivileges`, strict filesystem protection, private temporary/devices namespaces, kernel/control-group protection, AF_UNIX-only networking, and writable access restricted to the CloudDeck Caddy directory, Nginx `conf.d`, and its runtime socket directory.
+
+For Caddy, the administrator must add exactly this import once:
+
+```caddy
+import /etc/caddy/clouddeck.d/*
+```
+
+CloudDeck will refuse a Caddy apply until the import is present. For Nginx, CloudDeck validates with `nginx -t` and confirms the generated file appears in `nginx -T`.
+
+The Agent connects to the helper at `/run/clouddeck-proxy-helper/helper.sock` by default. A different absolute socket can be supplied to both services with `CLOUDDECK_PROXY_HELPER_SOCKET`, but production deployments should keep the default unless the systemd sandbox is adjusted accordingly.
