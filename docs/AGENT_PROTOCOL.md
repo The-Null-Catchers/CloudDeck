@@ -178,3 +178,12 @@ For `targetType: "s3"`, the payload also contains a validated transient S3 confi
 For local targets the storage key must equal `<backup-id>.tar.gz`. For S3 targets the key must end with the same UUID-derived filename and remain inside the configured object prefix. The Agent verifies the full archive checksum before extracting only `dump/database.dump` (PostgreSQL) or `dump/database.sql` (MySQL).
 
 PostgreSQL restores use fixed `pg_restore` arguments with clean/if-exists and exit-on-error behavior. MySQL restores use the fixed `mysql` client with the dump on stdin. Neither path invokes a shell or accepts arbitrary SQL from the API.
+
+
+### Typed filesystem restore
+
+`backup.restoreFilesystem` accepts only the persisted backup UUID, kind (`directory` or `docker_volume`), recorded source identifier, target type/storage key, expected SHA-256, and optional structured S3 credentials. It does not accept a destination path separate from the original backup job source.
+
+For directories the Agent resolves the recorded source through the same allowlisted-root checks used by backup creation. For Docker volumes it resolves only a strict local-driver named volume and refuses restoration while any container references that volume.
+
+The Agent verifies and extracts the archive completely before replacement. Live replacement is performed with same-parent directory renames and a preserved rollback path; if the new staging directory cannot be activated, the original directory is restored before the command returns an error.
