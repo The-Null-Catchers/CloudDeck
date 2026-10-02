@@ -3,7 +3,7 @@
 import {useEffect,useMemo,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import {
-  Activity,ArrowLeft,Clock3,Globe2,Pause,Play,Plus,RefreshCw,
+  Activity,ArrowLeft,Clock3,Globe2,Pause,Play,Plus,RefreshCw,Settings2,
   Server,ShieldCheck,Trash2,TriangleAlert
 } from 'lucide-react';
 import {api} from '@/lib/api';
@@ -17,6 +17,7 @@ type Domain={
   id:string;application_id:string;hostname:string;proxy_type:'caddy'|'nginx';target_port:number;
   enabled:boolean;https_status:'unknown'|'valid'|'invalid'|'unreachable';certificate_expires_at:string|null;
   certificate_issuer:string|null;tls_error:string|null;last_tls_checked_at:string|null;next_tls_check_at:string;
+  proxy_status:'unconfigured'|'applied'|'error';proxy_error:string|null;proxy_applied_at:string|null;
   application_name:string;server_id:string|null;server_name:string|null;server_status:string|null;
   alert_id:string|null;alert_state:'open'|'acknowledged'|null;
 };
@@ -40,6 +41,7 @@ export default function DomainsPage(){
   const [loading,setLoading]=useState(true);
   const [busy,setBusy]=useState<string|null>(null);
   const [error,setError]=useState('');
+  const canManage=org?.role==='owner'||org?.role==='admin'||org?.role==='operator';
 
   async function load(silent=false){
     if(!silent)setLoading(true);
@@ -108,8 +110,30 @@ export default function DomainsPage(){
     finally{setBusy(null)}
   }
 
+  async function applyProxy(domain:Domain){
+    if(!canManage||domain.server_status!=='online')return;
+    if(!confirm(`Apply managed ${domain.proxy_type.toUpperCase()} config for ${domain.hostname} → 127.0.0.1:${domain.target_port}? The server must have the CloudDeck proxy helper installed.`))return;
+    setBusy(`proxy-apply:${domain.id}`);setError('');
+    try{
+      await api(`/domains/${domain.id}/proxy/apply`,{method:'POST',body:JSON.stringify({confirm:true})});
+      await load(true);
+    }catch(e){setError(e instanceof Error?e.message:'Unable to apply proxy configuration')}
+    finally{setBusy(null)}
+  }
+
+  async function removeProxy(domain:Domain){
+    if(!canManage||domain.server_status!=='online')return;
+    if(!confirm(`Remove CloudDeck-managed ${domain.proxy_type.toUpperCase()} config for ${domain.hostname}? The domain record and TLS monitoring will remain.`))return;
+    setBusy(`proxy-remove:${domain.id}`);setError('');
+    try{
+      await api(`/domains/${domain.id}/proxy/remove`,{method:'POST',body:JSON.stringify({confirm:true})});
+      await load(true);
+    }catch(e){setError(e instanceof Error?e.message:'Unable to remove proxy configuration')}
+    finally{setBusy(null)}
+  }
+
   async function remove(domain:Domain){
-    if(!confirm(`Detach ${domain.hostname} from CloudDeck? This removes monitoring metadata but does not edit your proxy yet.`))return;
+    if(!canManage||!confirm(`Detach ${domain.hostname} from CloudDeck? If its managed proxy config is applied, CloudDeck will remove that config first.`))return;
     setBusy(`delete:${domain.id}`);setError('');
     try{
       await api(`/domains/${domain.id}`,{method:'DELETE'});
@@ -137,7 +161,7 @@ export default function DomainsPage(){
     <main className="deploy-content">
       <section className="deploy-hero">
         <div><span className="eyebrow">INFRASTRUCTURE / DOMAINS</span><h1>Domains & TLS</h1><p>Attach hostnames to applications, track proxy targets, and monitor public TLS certificates.</p></div>
-        <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button><button className="primary" onClick={()=>setShowCreate(value=>!value)}><Plus size={15}/> Add domain</button></div>
+        <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button>{canManage&&<button className="primary" onClick={()=>setShowCreate(value=>!value)}><Plus size={15}/> Add domain</button>}</div>
       </section>
 
       {error&&<div className="notice" role="status">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
@@ -149,8 +173,8 @@ export default function DomainsPage(){
         <div><Clock3 size={18}/><span>Needs check</span><strong>{summary.unknown}</strong></div>
       </section>
 
-      {showCreate&&<form className="deploy-section domain-create" onSubmit={createDomain}>
-        <div className="deploy-section-head"><div><h2>Attach a domain</h2><p>CloudDeck monitors TLS now. Proxy automation is enabled separately so the unprivileged agent never receives blanket root access.</p></div></div>
+      {showCreate&&canManage&&<form className="deploy-section domain-create" onSubmit={createDomain}>
+        <div className="deploy-section-head"><div><h2>Attach a domain</h2><p>CloudDeck can monitor TLS and, when the constrained proxy helper is installed on the server, apply a dedicated Caddy or Nginx reverse-proxy fragment.</p></div></div>
         <div className="domain-form-grid">
           <label>Application<select required value={form.applicationId} onChange={e=>chooseApplication(e.target.value)}><option value="">Choose application</option>{applications.map(item=><option key={item.id} value={item.id}>{item.name} · {item.server_name??'server'}</option>)}</select></label>
           <label>Hostname<input required value={form.hostname} onChange={e=>setForm({...form,hostname:e.target.value})} placeholder="api.example.com"/></label>
@@ -171,7 +195,7 @@ export default function DomainsPage(){
               <div className="domain-copy">
                 <strong>{domain.hostname}</strong>
                 <small>{domain.application_name} · {domain.server_name??'server'} · 127.0.0.1:{domain.target_port}</small>
-                <em>{domain.proxy_type.toUpperCase()} · {domain.enabled?'Monitoring enabled':'Monitoring paused'}</em>
+                <em>{domain.proxy_type.toUpperCase()} · proxy {domain.proxy_status} · {domain.enabled?'Monitoring enabled':'Monitoring paused'}</em>
               </div>
               <div className="domain-tls">
                 <span className={`health-state ${tlsClass}`}>{domain.https_status}</span>
@@ -180,9 +204,11 @@ export default function DomainsPage(){
               </div>
               <div className="domain-seen"><Clock3 size={13}/><span>{when(domain.last_tls_checked_at)}</span></div>
               <div className="domain-actions">
-                <button title="Check TLS now" onClick={()=>void check(domain)} disabled={busy===`check:${domain.id}`}><RefreshCw size={15}/></button>
-                <button title={domain.enabled?'Pause monitoring':'Resume monitoring'} onClick={()=>void toggle(domain)} disabled={busy===`toggle:${domain.id}`}>{domain.enabled?<Pause size={15}/>:<Play size={15}/>}</button>
-                <button className="danger" title="Detach domain" onClick={()=>void remove(domain)} disabled={busy===`delete:${domain.id}`}><Trash2 size={15}/></button>
+                <button title="Check TLS now" onClick={()=>void check(domain)} disabled={busy!==null}><RefreshCw size={15}/></button>
+                {canManage&&domain.proxy_status!=='applied'&&<button title="Apply managed proxy config" onClick={()=>void applyProxy(domain)} disabled={busy!==null||domain.server_status!=='online'}><Settings2 size={15}/></button>}
+                {canManage&&domain.proxy_status==='applied'&&<button title="Remove managed proxy config" onClick={()=>void removeProxy(domain)} disabled={busy!==null||domain.server_status!=='online'}><Settings2 size={15}/></button>}
+                {canManage&&<button title={domain.enabled?'Pause monitoring':'Resume monitoring'} onClick={()=>void toggle(domain)} disabled={busy!==null}>{domain.enabled?<Pause size={15}/>:<Play size={15}/>}</button>}
+                {canManage&&<button className="danger" title="Detach domain" onClick={()=>void remove(domain)} disabled={busy!==null}><Trash2 size={15}/></button>}
               </div>
             </article>
           })}
@@ -191,7 +217,7 @@ export default function DomainsPage(){
       </section>
 
       <section className="domain-security-note">
-        <Server size={17}/><div><strong>Proxy automation stays least-privilege</strong><span>This release records the intended Caddy/Nginx target and monitors TLS. The next agent integration uses a constrained privileged helper rather than weakening the agent service sandbox.</span></div>
+        <Server size={17}/><div><strong>Least-privilege proxy automation</strong><span>The unprivileged Agent never writes /etc or reloads services. A separate root helper accepts only validated domain apply/remove requests over a group-restricted Unix socket, validates the full proxy config, and rolls back its fragment if validation or reload fails.</span></div>
       </section>
     </main>
   </div>
