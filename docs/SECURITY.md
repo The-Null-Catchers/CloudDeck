@@ -10,7 +10,7 @@ RBAC: viewers can read inventory, metrics and logs; operators can perform approv
 
 Realtime Docker/systemd log streams use one-time tickets and are forwarded in memory without log persistence. Browser terminal sessions also use one-time tickets, a dedicated `terminal.access` permission, PTYs, a 30-minute hard timeout, and start/stop audit records. Terminal contents are not stored.
 
-Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, encrypted backup payloads, filesystem/Docker-volume restore, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
+Known production blockers remain: agent credential rotation UI, TOTP, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, encrypted backup payloads, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
 
 
 ## Health-check SSRF boundary
@@ -90,3 +90,14 @@ Backup and restore start paths lock the owning backup-job row before creating a 
 The Agent verifies the recorded archive SHA-256 before any database mutation. S3 restore downloads are signed, redirect-free, prefix-scoped, bounded by the configured backup size limit, and must match both S3 checksum metadata and the persisted backup checksum. Archive extraction accepts only the generated database-dump layout and rejects extra entries.
 
 PostgreSQL and MySQL clients are executed directly without a shell. Credentials are delivered only for the active restore and are written to temporary 0600 client files that are removed with the restore staging directory. Command stdout/stderr are discarded so database data and credentials are not persisted into CloudDeck logs. Filesystem and Docker-volume restore are not exposed yet because safe replacement requires an additional rollback boundary.
+
+
+## Filesystem restore boundary
+
+Directory and Docker-volume restore requests use only a previously verified successful backup ID and explicit confirmation. The API reconstructs the source and storage metadata from durable state; the user cannot provide an arbitrary filesystem destination, archive path, Docker mountpoint, or S3 object key.
+
+Before any live mutation, the Agent verifies SHA-256 over the complete archive and extracts into a sibling staging directory. The tar reader accepts only regular files/directories under the exact basename of the recorded source target. Absolute paths, traversal, symlinks, devices, sockets, FIFOs, duplicate file creation, oversized content, and excessive entry counts are rejected.
+
+Activation preserves the current target with a same-filesystem rename and then renames the fully extracted staging tree into place. A failed activation automatically renames the preserved original back. This gives a narrow rollback boundary without copying live data through the API.
+
+Docker-volume restore is stricter: only named local-driver volumes are eligible, their resolved mountpoint must stay under the trusted Docker volume root, and restoration is refused while any Docker container references the volume. CloudDeck does not stop containers implicitly for a restore.

@@ -27,7 +27,8 @@ export const allowedActions = [
   'backup.execute',
   'backup.deleteLocal',
   'backup.deleteS3',
-  'backup.restoreDatabase'
+  'backup.restoreDatabase',
+  'backup.restoreFilesystem'
 ] as const;
 export type AgentAction = typeof allowedActions[number];
 export interface ApiError { error: { code: string; message: string } }

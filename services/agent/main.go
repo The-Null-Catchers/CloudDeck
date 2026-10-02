@@ -143,6 +143,10 @@ func connect(endpoint,credential string) error {
      go executeDatabaseRestoreCommand(ctx,command,write)
      continue
     }
+    if command.Action=="backup.restoreFilesystem"{
+     go executeFilesystemRestoreCommand(ctx,command,write)
+     continue
+    }
     if command.Action=="deployment.execute"{
      go executeDeploymentCommand(ctx,command,write)
      continue

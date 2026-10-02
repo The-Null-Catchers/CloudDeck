@@ -70,3 +70,14 @@ Restore requests are durable in `backup_restores`. The API locks the owning `bac
 The Agent never receives arbitrary restore paths or SQL text. Local restores resolve only the UUID-derived archive already recorded for the backup. S3 restores issue a signed GET for the recorded prefix-scoped object, require the persisted SHA-256 metadata, stream into a bounded 0600 staging file, and verify the full downloaded checksum before extraction. The tar reader accepts only the expected `dump/database.dump` or `dump/database.sql` layout.
 
 PostgreSQL restoration invokes the fixed `pg_restore` binary with `--clean --if-exists --no-owner --no-privileges --exit-on-error` and temporary 0600 pgpass credentials. MySQL restoration invokes the fixed `mysql` client and streams the verified SQL dump through stdin with temporary client credentials. No shell is used. Restore request/completion/failure are audited. Filesystem and Docker-volume restore remain a separate safety-focused slice because they require a robust on-host rollback strategy before destructive replacement is exposed.
+
+
+### Filesystem and Docker-volume restore
+
+Verified directory and Docker-volume backups use the same durable `backup_restores` workflow as database restores. The browser still submits only the backup ID plus explicit confirmation; source path, volume name, storage key, checksum, server, and S3 target are read from persisted backup/job state.
+
+The Agent verifies the complete archive checksum before touching the live target. It rejects absolute/traversal archive paths, symlinks, special files, unexpected top-level roots, excessive entry counts, and content beyond the configured restore size limit. Extraction happens into a hidden sibling staging directory on the same filesystem as the target.
+
+Activation uses a rollback rename sequence: the current target is renamed to a hidden rollback path, the fully extracted staging directory is renamed into the live path, and the original is removed only after activation succeeds. If activation fails, the Agent restores the preserved original path. Directory sources still must resolve inside `CLOUDDECK_BACKUP_SOURCE_ROOTS`.
+
+Docker-volume restores add another safety gate: the local named volume must not be referenced by any Docker container, including stopped containers. The restore operates only on the already-validated local-driver mountpoint under `CLOUDDECK_DOCKER_VOLUME_ROOT`; it does not create/delete volumes or accept mount paths from the API.
