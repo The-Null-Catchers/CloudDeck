@@ -20,6 +20,19 @@ fi
 
 mkdir -p android/app/src/main android/app/src/debug
 
+if [ -f android/app/build.gradle.kts ]; then
+  sed -i 's/org\.clouddeck\.clouddeck_mobile/org.clouddeck.mobile/g' android/app/build.gradle.kts
+fi
+rm -rf android/app/src/main/kotlin
+mkdir -p android/app/src/main/kotlin/org/clouddeck/mobile
+cat > android/app/src/main/kotlin/org/clouddeck/mobile/MainActivity.kt <<'EOF'
+package org.clouddeck.mobile
+
+import io.flutter.embedding.android.FlutterActivity
+
+class MainActivity : FlutterActivity()
+EOF
+
 cat > android/app/src/main/AndroidManifest.xml <<'EOF'
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
