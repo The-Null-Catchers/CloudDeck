@@ -2,7 +2,11 @@
 
 The API is the only publicly reachable service. Agents initiate outbound WebSocket connections. PostgreSQL owns identity, sessions, membership, inventory, metrics, durable notification delivery state, and append-only audit history. Redis backs BullMQ deployment execution and notification email delivery queues. The web client keeps its access token in memory and refreshes through an HttpOnly SameSite cookie.
 
-Metric samples arrive every 15 seconds and are aggregated into one row per server per minute. The primary key `(server_id, bucket_at)` bounds row growth. A retention/downsampling worker is still required before long-term monitoring use. PostgreSQL can later migrate metric partitions to TimescaleDB without changing endpoint shapes.
+Metric samples arrive every 15 seconds and are aggregated into one row per server per minute. A distributed-safe periodic rollup worker recomputes completed hours into `server_metrics_hourly`, then deletes minute rows only after the matching hourly bucket exists and the configured raw-retention window has elapsed. Hourly history has its own configurable retention window.
+
+The defaults keep 48 hours of minute data and 90 days of hourly data. `METRICS_RAW_RETENTION_HOURS` is bounded to 24–168 hours and `METRICS_HOURLY_RETENTION_DAYS` to 30–365 days. Short API ranges (1h/6h/24h) read minute buckets; 7d/30d read hourly rollups and fill any not-yet-persisted recent hour from remaining raw rows. This keeps 30-day responses near hundreds rather than tens of thousands of points while avoiding gaps if the rollup runner is briefly delayed.
+
+The rollup is idempotent and safe across multiple API replicas because each run derives hourly rows deterministically with upserts; raw deletion requires a corresponding hourly row. PostgreSQL can later migrate these tables to TimescaleDB without changing endpoint shapes.
 
 All multi-tenant reads join or check organization membership before accessing server resources. Only owners/admins may create servers. Agents have per-server credentials hashed in storage; they cannot call user routes. The API sends only typed, allowlisted Docker, systemd, log, terminal-session, and deployment actions after resource authorization, validation, and audit checks. See `AGENT_PROTOCOL.md`.
 
