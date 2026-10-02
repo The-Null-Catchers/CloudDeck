@@ -113,13 +113,15 @@ func validateCaddy(ctx context.Context,path string)error{
  if runErr!=nil{return errors.New("Caddy validation failed: "+runErr.Error())}
  return nil
 }
-func validateNginx(ctx context.Context,path string)error{
+func validateNginx(ctx context.Context,path string,requireIncluded bool)error{
  binary,err:=executable("CLOUDDECK_NGINX_BIN","/usr/sbin/nginx");if err!=nil{return err}
  if _,runErr:=runBounded(ctx,binary,"-t");runErr!=nil{return errors.New("Nginx validation failed: "+runErr.Error())}
- output,runErr:=runBounded(ctx,binary,"-T")
- if runErr!=nil{return errors.New("Nginx config inspection failed: "+runErr.Error())}
- marker:="# configuration file "+path+":"
- if !strings.Contains(output,marker){return errors.New("Nginx active configuration does not include the CloudDeck conf.d file")}
+ if requireIncluded{
+  output,runErr:=runBounded(ctx,binary,"-T")
+  if runErr!=nil{return errors.New("Nginx config inspection failed: "+runErr.Error())}
+  marker:="# configuration file "+path+":"
+  if !strings.Contains(output,marker){return errors.New("Nginx active configuration does not include the CloudDeck conf.d file")}
+ }
  return nil
 }
 func reload(ctx context.Context,proxyType string)error{
@@ -128,9 +130,9 @@ func reload(ctx context.Context,proxyType string)error{
  if _,runErr:=runBounded(ctx,binary,"reload",service);runErr!=nil{return fmt.Errorf("%s reload failed: %w",proxyType,runErr)}
  return nil
 }
-func validate(ctx context.Context,proxyType,path string)error{
+func validate(ctx context.Context,proxyType,path string,remove bool)error{
  if proxyType=="caddy"{return validateCaddy(ctx,path)}
- return validateNginx(ctx,path)
+ return validateNginx(ctx,path,!remove)
 }
 func mutate(ctx context.Context,body requestBody,remove bool)error{
  if err:=validateRequest(body,remove);err!=nil{return err}
@@ -139,7 +141,7 @@ func mutate(ctx context.Context,body requestBody,remove bool)error{
  if remove{
   if err:=os.Remove(path);err!=nil&&!errors.Is(err,os.ErrNotExist){return errors.New("unable to remove proxy config")}
  }else if err:=atomicWrite(path,render(body));err!=nil{return err}
- if err:=validate(ctx,body.ProxyType,path);err!=nil{
+ if err:=validate(ctx,body.ProxyType,path,remove);err!=nil{
   restoreSnapshot(path,previous,existed)
   return err
  }
