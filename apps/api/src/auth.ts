@@ -7,13 +7,30 @@ import { accessToken, authenticate, audit, digest, randomToken } from './securit
 const credentials = z.object({email: z.email().max(320).transform(v => v.toLowerCase()),password: z.string().min(12).max(256)});
 const emailSchema = z.object({email: z.email().max(320).transform(v => v.toLowerCase())});
 const tokenSchema = z.object({token: z.string().min(20)});
+const mobileCredentials=credentials.extend({deviceName:z.string().trim().min(1).max(120).optional()});
+const mobileRefresh=z.object({refreshToken:z.string().min(20)}).strict();
 const refreshOptions = {httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict' as const, path: '/api/v1/auth', maxAge: 60*60*24*30};
 function setRefresh(reply: FastifyReply, value: string) { reply.setCookie('clouddeck_refresh', value, refreshOptions); }
+async function createSession(userId:string){
+  const refresh=randomToken();
+  const result=await pool.query(
+    "INSERT INTO sessions(user_id,refresh_hash,expires_at) VALUES($1,$2,now()+interval '30 days') RETURNING id",
+    [userId,digest(refresh)]
+  );
+  return {sessionId:result.rows[0].id as string,refresh};
+}
 async function issue(userId: string, reply: FastifyReply) {
-  const refresh = randomToken();
-  const result = await pool.query('INSERT INTO sessions(user_id,refresh_hash,expires_at) VALUES($1,$2,now()+interval \'30 days\') RETURNING id', [userId,digest(refresh)]);
-  setRefresh(reply,refresh);
-  return {accessToken: await accessToken(userId,result.rows[0].id), expiresIn: 600};
+  const session=await createSession(userId);
+  setRefresh(reply,session.refresh);
+  return {accessToken: await accessToken(userId,session.sessionId), expiresIn: 600};
+}
+async function issueMobile(userId:string){
+  const session=await createSession(userId);
+  return {
+    accessToken:await accessToken(userId,session.sessionId),
+    refreshToken:session.refresh,
+    expiresIn:600
+  };
 }
 async function createChallenge(userId: string, email: string, kind: 'verify_email'|'reset_password') {
   const token = randomToken();
@@ -43,6 +60,44 @@ export async function authRoutes(app: FastifyInstance) {
     await audit(null,result.rows[0].id,'auth.login','user',result.rows[0].id,request.ip);
     return issue(result.rows[0].id,reply);
   });
+  app.post('/mobile/login',{config:{rateLimit:{max:5,timeWindow:'1 minute'}}},async request=>{
+    const input=mobileCredentials.parse(request.body);
+    const result=await pool.query('SELECT id,password_hash FROM users WHERE email=$1',[input.email]);
+    const valid=result.rowCount?await argon2.verify(result.rows[0].password_hash,input.password):false;
+    if(!valid)throw Object.assign(new Error('Invalid credentials'),{statusCode:401});
+    await audit(null,result.rows[0].id,'auth.mobile.login','user',result.rows[0].id,request.ip,{
+      deviceName:input.deviceName??null
+    });
+    return issueMobile(result.rows[0].id);
+  });
+
+  app.post('/mobile/refresh',async request=>{
+    const {refreshToken}=mobileRefresh.parse(request.body);
+    const replacement=randomToken();
+    const result=await pool.query(
+      `UPDATE sessions
+       SET refresh_hash=$1,last_used_at=now()
+       WHERE refresh_hash=$2 AND revoked_at IS NULL AND expires_at>now()
+       RETURNING id,user_id`,
+      [digest(replacement),digest(refreshToken)]
+    );
+    if(!result.rowCount)throw Object.assign(new Error('Session expired'),{statusCode:401});
+    return {
+      accessToken:await accessToken(result.rows[0].user_id,result.rows[0].id),
+      refreshToken:replacement,
+      expiresIn:600
+    };
+  });
+
+  app.post('/mobile/logout',async request=>{
+    const {refreshToken}=mobileRefresh.parse(request.body);
+    await pool.query(
+      'UPDATE sessions SET revoked_at=now() WHERE refresh_hash=$1 AND revoked_at IS NULL',
+      [digest(refreshToken)]
+    );
+    return {ok:true};
+  });
+
   app.post('/refresh', async (request,reply) => {
     const refresh = request.cookies.clouddeck_refresh;
     if (!refresh) throw Object.assign(new Error('Session expired'), {statusCode:401});
