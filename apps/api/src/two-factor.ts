@@ -1,5 +1,6 @@
 import argon2 from 'argon2';
 import type {FastifyInstance} from 'fastify';
+import type pg from 'pg';
 import {z} from 'zod';
 import {pool,transaction} from './db.js';
 import {authenticate,audit,digest,randomToken} from './security.js';
@@ -48,7 +49,7 @@ export async function beginTwoFactorChallenge(userId:string,clientType:'web'|'mo
 }
 
 async function verifyFactorWithDb(
-  db:{query:(text:string,values?:unknown[])=>Promise<{rows:any[];rowCount:number|null}>},
+  db:Pick<pg.PoolClient,'query'>,
   userId:string,
   code:string
 ){
