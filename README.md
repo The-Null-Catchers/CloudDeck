@@ -18,6 +18,7 @@ CloudDeck is a multi-server operations and observability platform that combines 
 - Domain inventory, distributed TLS certificate monitoring with expiry alerts and SSRF-safe public probing, plus optional least-privilege Caddy/Nginx proxy automation through a separate root helper.
 - Encrypted workspace secret storage using AES-256-GCM, metadata/value separation, no plaintext read API, audited rotation/deletion, and admin/owner management.
 - Verified backups for allowlisted directories, local Docker volumes, PostgreSQL, and MySQL, with local or S3-compatible targets, typed Agent execution, SHA-256 manifests, archive re-read verification, signed S3 post-upload verification, retention cleanup, recurring schedules, encrypted credentials, and confirmed audited PostgreSQL/MySQL/directory/Docker-volume restore workflows.
+- Flutter mobile foundation with native rotating refresh-token sessions, device secure storage, dashboard/server monitoring, historical metrics, alerts, deployment status, notifications, Docker container inventory, bounded logs, and confirmed container restart for authorized operators.
 
 ## Architecture
 
@@ -100,6 +101,6 @@ See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [arc
 5. Deployments — guarded state machine/read APIs, verified GitHub App linking, installation-scoped repository/branch discovery, and validated Application source configuration implemented; next: BullMQ execution, health activation, and rollback orchestration.
 6. Health checks, alert rules and email/in-app notifications.
 7. Domains/TLS monitoring, constrained Caddy/Nginx proxy automation, encrypted secrets, verified local/S3-compatible backups, recurring scheduling, and all supported restore workflows are functional; encrypted backup payloads remain.
-8. Flutter monitoring and emergency-operation mobile app.
+8. Flutter monitoring and emergency-operation mobile app — foundation and core monitoring/emergency surfaces implemented; Android/iOS platform packaging, push notifications, and release artifacts remain.
 
 No UI or API response claims a pending feature was performed.
