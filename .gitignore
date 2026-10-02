@@ -8,3 +8,8 @@ coverage/
 *.log
 
 *.tsbuildinfo
+
+apps/mobile/.dart_tool/
+apps/mobile/build/
+apps/mobile/android/
+apps/mobile/.metadata
