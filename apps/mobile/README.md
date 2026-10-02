@@ -4,7 +4,7 @@ Flutter client for monitoring and emergency operations.
 
 ## Implemented
 
-- native sign-in using rotating bearer refresh tokens
+- native sign-in using rotating bearer refresh tokens with TOTP/recovery-code challenge support
 - refresh token persistence through `flutter_secure_storage` (Android Keystore / iOS Keychain-backed storage)
 - workspace switching
 - dashboard server/alert summaries
