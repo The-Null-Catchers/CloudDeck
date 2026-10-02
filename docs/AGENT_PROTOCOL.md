@@ -187,3 +187,22 @@ PostgreSQL restores use fixed `pg_restore` arguments with clean/if-exists and ex
 For directories the Agent resolves the recorded source through the same allowlisted-root checks used by backup creation. For Docker volumes it resolves only a strict local-driver named volume and refuses restoration while any container references that volume.
 
 The Agent verifies and extracts the archive completely before replacement. Live replacement is performed with same-parent directory renames and a preserved rollback path; if the new staging directory cannot be activated, the original directory is restored before the command returns an error.
+
+
+## Managed reverse-proxy commands
+
+`proxy.applyDomain` accepts exactly:
+
+```json
+{"proxyType":"caddy","hostname":"api.example.com","targetPort":4000}
+```
+
+`proxy.removeDomain` accepts exactly:
+
+```json
+{"proxyType":"caddy","hostname":"api.example.com"}
+```
+
+The Agent validates these values, then forwards the same structured request to the local root proxy helper over `/run/clouddeck-proxy-helper/helper.sock`. The helper socket is not network-accessible and is group-restricted to the CloudDeck service account.
+
+The helper generates a fixed reverse-proxy template targeting loopback only. It validates the complete Caddy/Nginx configuration before reload and restores the previous CloudDeck fragment if validation or reload fails. No proxy action accepts raw configuration, a filesystem path, shell text, a service name, or arbitrary command arguments.
