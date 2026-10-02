@@ -89,3 +89,12 @@ The Agent verifies the complete archive checksum before touching the live target
 Activation uses a rollback rename sequence: the current target is renamed to a hidden rollback path, the fully extracted staging directory is renamed into the live path, and the original is removed only after activation succeeds. If activation fails, the Agent restores the preserved original path. Directory sources still must resolve inside `CLOUDDECK_BACKUP_SOURCE_ROOTS`.
 
 Docker-volume restores add another safety gate: the local named volume must not be referenced by any Docker container, including stopped containers. The restore operates only on the already-validated local-driver mountpoint under `CLOUDDECK_DOCKER_VOLUME_ROOT`; it does not create/delete volumes or accept mount paths from the API.
+
+
+## Two-factor login flow
+
+CloudDeck's existing session model is unchanged after authentication: web clients use an HttpOnly rotating refresh cookie while native mobile clients use a rotating refresh token held in platform secure storage. TOTP adds a pre-session gate in front of both flows.
+
+When a TOTP-enabled user supplies a valid password, the API inserts a hashed five-minute `two_factor_challenges` token tagged as `web` or `mobile`. Only the matching completion endpoint can exchange that challenge after validating the authenticator code or atomically consuming one recovery code. Session creation happens only after challenge completion.
+
+The TOTP secret lives in `user_totp` as AES-GCM ciphertext/IV/tag/key-version fields. Recovery codes live separately as one-way hashes with individual `used_at` timestamps. This keeps factor material independent from normal session rows and avoids putting reusable second-factor values into JWTs, cookies, mobile storage, audit metadata, or logs.
