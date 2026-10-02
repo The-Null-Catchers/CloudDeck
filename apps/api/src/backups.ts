@@ -329,7 +329,6 @@ export async function backupRoutes(app:FastifyInstance){
     const item=result.rows[0];
     await membership(userId,item.organization_id,'backup.manage');
     if(item.status!=='successful'||!item.verified_at||!item.storage_key||!item.sha256)throw Object.assign(new Error('Only verified successful backups can be restored'),{statusCode:409});
-    if(item.kind!=='postgres'&&item.kind!=='mysql')throw Object.assign(new Error('Filesystem restore is not available in this restore slice'),{statusCode:409});
     if(item.server_status!=='online')throw Object.assign(new Error('Backup server is offline'),{statusCode:503});
 
     let restore:{id:string;status:string;started_at:string;created_at:string};
@@ -355,16 +354,6 @@ export async function backupRoutes(app:FastifyInstance){
     }
 
     try{
-      if(!item.source_secret_id)throw new Error('Database backup source secret is missing');
-      let database:z.infer<typeof databaseSecret>;
-      let plaintext='';
-      try{
-        plaintext=await readSecretValueForService(item.source_secret_id,item.organization_id);
-        database=parseDatabaseBackupSecret(plaintext);
-      }finally{
-        plaintext='';
-      }
-
       let s3:z.infer<typeof s3Secret>|undefined;
       if(item.target_type==='s3'){
         if(!item.target_secret_id)throw new Error('S3 backup target secret is missing');
@@ -377,16 +366,40 @@ export async function backupRoutes(app:FastifyInstance){
         }
       }
 
-      const raw=await sendAgentCommand(item.server_id,'backup.restoreDatabase',{
-        backupId:item.id,
-        kind:item.kind,
-        databaseName:item.source,
-        targetType:item.target_type,
-        storageKey:item.storage_key,
-        expectedSha256:item.sha256,
-        database,
-        s3
-      },30*60_000);
+      let raw:unknown;
+      if(item.kind==='postgres'||item.kind==='mysql'){
+        if(!item.source_secret_id)throw new Error('Database backup source secret is missing');
+        let database:z.infer<typeof databaseSecret>;
+        let plaintext='';
+        try{
+          plaintext=await readSecretValueForService(item.source_secret_id,item.organization_id);
+          database=parseDatabaseBackupSecret(plaintext);
+        }finally{
+          plaintext='';
+        }
+        raw=await sendAgentCommand(item.server_id,'backup.restoreDatabase',{
+          backupId:item.id,
+          kind:item.kind,
+          databaseName:item.source,
+          targetType:item.target_type,
+          storageKey:item.storage_key,
+          expectedSha256:item.sha256,
+          database,
+          s3
+        },30*60_000);
+      }else if(item.kind==='directory'||item.kind==='docker_volume'){
+        raw=await sendAgentCommand(item.server_id,'backup.restoreFilesystem',{
+          backupId:item.id,
+          kind:item.kind,
+          source:item.source,
+          targetType:item.target_type,
+          storageKey:item.storage_key,
+          expectedSha256:item.sha256,
+          s3
+        },30*60_000);
+      }else{
+        throw new Error('Unsupported backup kind for restore');
+      }
       const restored=z.object({restored:z.literal(true)}).strict().parse(raw);
       void restored;
       const completed=await transaction(async db=>{
