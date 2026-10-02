@@ -35,7 +35,11 @@ A distributed TLS runner claims due domains with PostgreSQL `FOR UPDATE SKIP LOC
 
 Certificate expiry warnings use the normal alert and notification pipeline. The default warning window is 14 days and can be bounded with `SSL_EXPIRY_WARNING_DAYS`. Expiry alerts are de-duplicated per domain and resolve automatically after a later valid certificate has more than the warning window remaining.
 
-Reverse-proxy mutation is intentionally not performed by the unprivileged agent in this stage. The production agent runs with `NoNewPrivileges=true` and a strict writable-path sandbox; Caddy/Nginx automation will use a separate constrained privileged helper instead of weakening that sandbox.
+Reverse-proxy mutation is never performed directly by the unprivileged Agent. The Agent keeps `NoNewPrivileges=true` and a strict writable-path sandbox. Optional Caddy/Nginx automation crosses a separate local Unix-socket boundary to `clouddeck-proxy-helper`, a root service that accepts only typed hostname/proxy/port apply/remove requests.
+
+The helper owns only CloudDeck-generated fragments under `/etc/caddy/clouddeck.d` or `/etc/nginx/conf.d`. It does not accept raw configuration, paths, shell commands, certificate paths, arbitrary service names, or reload arguments. Caddy apply requires the main Caddyfile to contain the exact CloudDeck import. Nginx apply runs `nginx -t` and then requires `nginx -T` to prove the generated fragment is part of the active config.
+
+Every mutation snapshots the prior CloudDeck fragment, writes/removes atomically, validates the complete proxy configuration, and reloads only the selected fixed service. Validation or reload failure restores the previous fragment and attempts to reload the previous working configuration. Domain rows track `proxy_status`, the latest bounded error, and application time. Hostname/proxy/target changes are blocked while a managed fragment is applied to avoid database/server drift.
 
 
 ## Encrypted secret storage
