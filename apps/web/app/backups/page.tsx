@@ -192,8 +192,10 @@ export default function BackupsPage(){
   }
 
   async function restore(job:BackupJob,item:BackupRow){
-    if(!canManage||job.server_status!=='online'||(job.kind!=='postgres'&&job.kind!=='mysql')||item.status!=='successful')return;
-    const warning=`Restore backup from ${when(item.created_at)} into ${job.kind==='postgres'?'PostgreSQL':'MySQL'} database "${job.source}"? Existing database objects/data may be replaced. This operation is audited and cannot be undone by CloudDeck.`;
+    if(!canManage||job.server_status!=='online'||item.status!=='successful')return;
+    const targetLabel=job.kind==='postgres'?'PostgreSQL database':job.kind==='mysql'?'MySQL database':job.kind==='docker_volume'?'Docker volume':'directory';
+    const extra=job.kind==='docker_volume'?' The volume must not be attached to any container.':'';
+    const warning=`Restore backup from ${when(item.created_at)} into ${targetLabel} "${job.source}"? Existing contents will be replaced.${extra} This operation is audited and cannot be undone by CloudDeck.`;
     if(!confirm(warning))return;
     setBusy(`restore:${item.id}`);setError('');
     try{
@@ -294,7 +296,7 @@ export default function BackupsPage(){
       </form>}
 
       <section className="deploy-section">
-        <div className="deploy-section-head"><div><h2>Backup jobs</h2><p>Success means the Agent verified the archive before persistence. Verified PostgreSQL/MySQL history rows can be restored with an explicit destructive-action confirmation.</p></div><span>{jobs.length} configured</span></div>
+        <div className="deploy-section-head"><div><h2>Backup jobs</h2><p>Success means the Agent verified the archive before persistence. Verified history rows can be restored with an explicit destructive-action confirmation. Docker-volume restores are blocked while any container uses the volume.</p></div><span>{jobs.length} configured</span></div>
         <div className="backup-list">
           {jobs.map(job=><article className="backup-card" key={job.id}>
             <div className="backup-main">
@@ -318,7 +320,7 @@ export default function BackupsPage(){
                 <span>{when(item.created_at)}</span>
                 <code>{item.sha256?item.sha256.slice(0,16)+'…':'—'}</code>
                 <small>{item.status==='successful'?`${item.manifest?.entryCount??0} entries · verified`:item.error??'In progress'}{item.latest_restore_status?` · restore ${item.latest_restore_status}`:''}</small>
-                {canManage&&(job.kind==='postgres'||job.kind==='mysql')&&item.status==='successful'&&<button className="compact" title="Restore this database backup" onClick={()=>void restore(job,item)} disabled={busy!==null||job.server_status!=='online'||item.latest_restore_status==='running'}><RotateCcw size={14}/>{busy===`restore:${item.id}`?'Restoring…':'Restore'}</button>}
+                {canManage&&item.status==='successful'&&<button className="compact" title="Restore this verified backup" onClick={()=>void restore(job,item)} disabled={busy!==null||job.server_status!=='online'||item.latest_restore_status==='running'}><RotateCcw size={14}/>{busy===`restore:${item.id}`?'Restoring…':'Restore'}</button>}
               </div>)}
               {!history[job.id]?.length&&<div className="deployment-empty">No backup runs yet.</div>}
             </div>}
