@@ -86,14 +86,14 @@ export async function authRoutes(app: FastifyInstance) {
     return issueMobile(result.rows[0].id);
   });
 
-  app.post('/2fa/complete',async (request,reply)=>{
+  app.post('/2fa/complete',{config:{rateLimit:{max:10,timeWindow:'1 minute'}}},async (request,reply)=>{
     const body=twoFactorComplete.parse(request.body);
     const verified=await completeTwoFactorChallenge(body.challengeToken,body.code,'web');
     await audit(null,verified.userId,'auth.login.2fa','user',verified.userId,request.ip,{usedRecovery:verified.usedRecovery});
     return issue(verified.userId,reply);
   });
 
-  app.post('/mobile/2fa/complete',async request=>{
+  app.post('/mobile/2fa/complete',{config:{rateLimit:{max:10,timeWindow:'1 minute'}}},async request=>{
     const body=twoFactorComplete.parse(request.body);
     const verified=await completeTwoFactorChallenge(body.challengeToken,body.code,'mobile');
     await audit(null,verified.userId,'auth.mobile.login.2fa','user',verified.userId,request.ip,{usedRecovery:verified.usedRecovery});
