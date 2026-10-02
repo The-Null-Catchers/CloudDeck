@@ -32,6 +32,7 @@ import {startNotificationQueueReconciler,closeNotificationQueue} from './notific
 import {startNotificationWorker,closeNotificationWorker} from './notification-worker.js';
 import './security.js';
 import { startOfflineSweep } from './offline.js';
+import {startMetricRollupRunner} from './metrics-retention.js';
 
 export function buildApp() {
   const app = Fastify({logger:{redact:['req.headers.authorization','req.headers.cookie','res.headers.set-cookie','body.password','body.token','body.credential','body.value']},bodyLimit:65536,trustProxy:false});
@@ -82,6 +83,7 @@ if (process.env.NODE_ENV !== 'test') {
   const stopNotificationQueueReconciler=startNotificationQueueReconciler();
   startNotificationWorker();
   const stopBackupRunner=startBackupRunner();
+  const stopMetricRollupRunner=startMetricRollupRunner();
   app.addHook('onClose',async()=>{
     stopSweep();
     stopDeploymentQueueReconciler();
@@ -89,6 +91,7 @@ if (process.env.NODE_ENV !== 'test') {
     stopDomainTlsRunner();
     stopNotificationQueueReconciler();
     stopBackupRunner();
+    stopMetricRollupRunner();
     await closeNotificationWorker();
     await closeNotificationQueue();
     await closeDeploymentWorker();
