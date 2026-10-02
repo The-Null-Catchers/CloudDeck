@@ -49,7 +49,7 @@ final class ApiClient {
         'deviceName': deviceName,
       },
     );
-    _acceptSession(response);
+    await _acceptSession(response);
     return response;
   }
 
@@ -120,7 +120,7 @@ final class ApiClient {
         '/api/v1/auth/mobile/refresh',
         body: {'refreshToken': refresh},
       );
-      _acceptSession(response);
+      await _acceptSession(response);
       return true;
     } on ApiException catch (error) {
       if (error.statusCode == 401) {
@@ -132,14 +132,14 @@ final class ApiClient {
     }
   }
 
-  void _acceptSession(Map<String, dynamic> response) {
+  Future<void> _acceptSession(Map<String, dynamic> response) async {
     final access = response['accessToken'];
     final refresh = response['refreshToken'];
     if (access is! String || refresh is! String) {
       throw ApiException('Invalid authentication response');
     }
     _accessToken = access;
-    sessionStore.writeRefreshToken(refresh);
+    await sessionStore.writeRefreshToken(refresh);
   }
 
   Future<Map<String, dynamic>> _raw(
