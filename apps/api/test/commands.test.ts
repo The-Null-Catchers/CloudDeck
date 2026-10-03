@@ -5,8 +5,8 @@ import {attachAgent,detachAgent,resolveAgentResult,sendAgentCommand,containerId,
 test('commands are scoped to the active agent and correlated by request ID',async()=>{
   const serverId=crypto.randomUUID();let sent='';
   const socket={readyState:1,send(value:string,done:(error?:Error)=>void){sent=value;done();}} as WebSocket;
-  assert.equal(attachAgent(serverId,socket),true);
-  assert.equal(attachAgent(serverId,socket),false);
+  assert.equal(await attachAgent(serverId,socket),true);
+  assert.equal(await attachAgent(serverId,socket),false);
   const pending=sendAgentCommand(serverId,'docker.listContainers');
   const envelope=JSON.parse(sent);
   assert.equal(envelope.action,'docker.listContainers');
@@ -14,7 +14,7 @@ test('commands are scoped to the active agent and correlated by request ID',asyn
   assert.equal(resolveAgentResult(serverId,{type:'command.result',requestId:envelope.requestId,success:true,data:[]}),true);
   assert.deepEqual(await pending,[]);
   detachAgent(serverId,socket);
-  assert.throws(()=>sendAgentCommand(serverId,'docker.listContainers'),/Agent not connected/);
+  await assert.rejects(()=>sendAgentCommand(serverId,'docker.listContainers'),/Agent not connected/);
 });
 test('container ID rejects names and path traversal',()=>{
   assert.equal(containerId.safeParse('../etc/passwd').success,false);
