@@ -32,6 +32,7 @@ import {startDeploymentWorker,closeDeploymentWorker} from './deployment-worker.j
 import {startNotificationQueueReconciler,closeNotificationQueue} from './notification-queue.js';
 import {startNotificationWorker,closeNotificationWorker} from './notification-worker.js';
 import {closeAgentRouter} from './commands.js';
+import {startRealtimeRouter,closeRealtimeRouter} from './realtime-router.js';
 import './security.js';
 import { startOfflineSweep } from './offline.js';
 import {startMetricRollupRunner} from './metrics-retention.js';
@@ -78,6 +79,7 @@ export function buildApp() {
 if (process.env.NODE_ENV !== 'test') {
   const app=buildApp();
   await app.listen({host:'0.0.0.0',port:Number(process.env.PORT ?? 4000)});
+  startRealtimeRouter();
   const stopSweep=startOfflineSweep();
   const stopDeploymentQueueReconciler=startDeploymentQueueReconciler();
   startDeploymentWorker();
@@ -95,6 +97,7 @@ if (process.env.NODE_ENV !== 'test') {
     stopNotificationQueueReconciler();
     stopBackupRunner();
     stopMetricRollupRunner();
+    await closeRealtimeRouter();
     await closeAgentRouter();
     await closeNotificationWorker();
     await closeNotificationQueue();

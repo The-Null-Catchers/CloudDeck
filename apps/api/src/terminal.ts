@@ -3,7 +3,7 @@ import type {FastifyInstance} from 'fastify';
 import {z} from 'zod';
 import {pool} from './db.js';
 import {authenticate,membership,audit,digest,randomToken} from './security.js';
-import {sendAgentEnvelope} from './commands.js';
+import {registerRealtimeRoute,routeAgentRealtimeEnvelope,unregisterRealtimeRoute} from './realtime-router.js';
 
 const params=z.object({serverId:z.uuid()});
 type Ticket={serverId:string;userId:string;organizationId:string;expiresAt:number};
@@ -64,18 +64,20 @@ export async function terminalRoutes(app:FastifyInstance){
       pendingReason=reason;
       clearTimeout(timeout);
       terminals.delete(terminalKey);
-      try{sendAgentEnvelope(ticket.serverId,{type:'terminal.close',sessionId});}catch{void 0;}
+      await unregisterRealtimeRoute(sessionId).catch(()=>{});
+      await routeAgentRealtimeEnvelope(ticket.serverId,sessionId,{type:'terminal.close',sessionId}).catch(()=>{});
       if(persisted)await pool.query('UPDATE terminal_sessions SET ended_at=now(),close_reason=$2 WHERE id=$1 AND ended_at IS NULL',[sessionId,reason]).catch(()=>undefined);
       await audit(ticket.organizationId,ticket.userId,'terminal.session.closed','server',ticket.serverId,request.ip,{sessionId,reason}).catch(()=>undefined);
       if(socket.readyState===1)socket.close(1000,'Terminal closed');
     };
     const timeout=setTimeout(()=>{void finish('timeout');},30*60_000);
 
-    terminals.set(terminalKey,message=>{
+    const deliver=(message:{sessionId:string;data?:string;exitCode?:number;error?:string})=>{
       if(socket.readyState!==1)return;
       socket.send(JSON.stringify(message.data!==undefined?{type:'data',data:message.data}:{type:'exit',exitCode:message.exitCode,error:message.error}));
       if(message.data===undefined)void finish(message.error?'agent_error':'process_exit');
-    });
+    };
+    terminals.set(terminalKey,deliver);
     socket.on('close',()=>{void finish('client_closed');});
     socket.on('error',()=>{void finish('client_error');});
     socket.on('message',(raw:Buffer)=>{
@@ -87,13 +89,11 @@ export async function terminalRoutes(app:FastifyInstance){
         z.object({type:z.literal('close')})
       ]).safeParse(value);
       if(!input.success){socket.close(1007,'Invalid terminal message');return;}
-      try{
-        if(input.data.type==='input'){
-          sendAgentEnvelope(ticket.serverId,{type:'terminal.input',sessionId,data:Buffer.from(input.data.data).toString('base64')});
-        }else if(input.data.type==='resize'){
-          sendAgentEnvelope(ticket.serverId,{type:'terminal.resize',sessionId,cols:input.data.cols,rows:input.data.rows});
-        }else void finish('client_closed');
-      }catch{void finish('agent_unavailable');}
+      if(input.data.type==='close'){void finish('client_closed');return;}
+      const envelope=input.data.type==='input'
+        ?{type:'terminal.input' as const,sessionId,data:Buffer.from(input.data.data).toString('base64')}
+        :{type:'terminal.resize' as const,sessionId,cols:input.data.cols,rows:input.data.rows};
+      void routeAgentRealtimeEnvelope(ticket.serverId,sessionId,envelope).catch(()=>void finish('agent_unavailable'));
     });
 
     void pool.query('INSERT INTO terminal_sessions(id,organization_id,server_id,user_id) VALUES($1,$2,$3,$4)',[sessionId,ticket.organizationId,ticket.serverId,ticket.userId])
@@ -104,11 +104,17 @@ export async function terminalRoutes(app:FastifyInstance){
           return;
         }
         await audit(ticket.organizationId,ticket.userId,'terminal.session.opened','server',ticket.serverId,request.ip,{sessionId});
-        sendAgentEnvelope(ticket.serverId,{type:'terminal.open',sessionId,cols:120,rows:36});
-        socket.send(JSON.stringify({type:'ready',sessionId,timeoutSeconds:1800}));
+        await registerRealtimeRoute(sessionId,message=>{
+          if(message.serverId!==ticket.serverId)return;
+          if(message.type==='agent.realtime.terminal.data'&&message.sessionId===sessionId)deliver({sessionId,data:message.data});
+          else if(message.type==='agent.realtime.terminal.exit'&&message.sessionId===sessionId)deliver({sessionId,exitCode:message.exitCode,error:message.error});
+        });
+        await routeAgentRealtimeEnvelope(ticket.serverId,sessionId,{type:'terminal.open',sessionId,cols:120,rows:36});
+        if(socket.readyState===1)socket.send(JSON.stringify({type:'ready',sessionId,timeoutSeconds:1800}));
       })
       .catch(async()=>{
         terminals.delete(terminalKey);
+        await unregisterRealtimeRoute(sessionId).catch(()=>{});
         if(persisted)await pool.query("UPDATE terminal_sessions SET ended_at=now(),close_reason='open_failed' WHERE id=$1 AND ended_at IS NULL",[sessionId]).catch(()=>undefined);
         socket.close(1011,'Terminal unavailable');
       });
