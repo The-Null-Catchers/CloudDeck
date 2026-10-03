@@ -140,7 +140,7 @@ export function forwardRemoteStream(serverId:string,message:unknown){
   if(!parsed.success)return false;
   const key=streamKey(serverId,parsed.data.subscriptionId);const routeId=remoteStreams.get(key);if(!routeId)return false;
   if(parsed.data.done||parsed.data.error)remoteStreams.delete(key);
-  const output={type:'agent.realtime.stream',serverId,...parsed.data};
+  const output={type:'agent.realtime.stream' as const,serverId,subscriptionId:parsed.data.subscriptionId,line:parsed.data.line,error:parsed.data.error,done:parsed.data.done};
   void ensureRouter().then(ok=>ok?publisher?.publish(routeChannel(routeId),JSON.stringify(output)):undefined).catch(()=>{});
   return true;
 }
