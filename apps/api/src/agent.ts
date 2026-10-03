@@ -46,7 +46,7 @@ export async function agentRoutes(app: FastifyInstance) {
       if (!h.success && !m.success) {socket.close(1007,'Invalid message');return;}
       lastMessage=Date.now();
       try {
-        if (h.success) {if(!ready && !attachAgent(serverId,socket)){socket.close(1008,'Agent already connected');return;}ready=true;await pool.query(`UPDATE servers SET hostname=$2,operating_system=$3,architecture=$4,agent_version=$5,status='online',last_seen_at=now() WHERE id=$1`,[serverId,h.data.hostname,h.data.operatingSystem,h.data.architecture,h.data.agentVersion]);}
+        if (h.success) {if(!ready && !await attachAgent(serverId,socket)){socket.close(1008,'Agent already connected');return;}ready=true;await pool.query(`UPDATE servers SET hostname=$2,operating_system=$3,architecture=$4,agent_version=$5,status='online',last_seen_at=now() WHERE id=$1`,[serverId,h.data.hostname,h.data.operatingSystem,h.data.architecture,h.data.agentVersion]);}
         else if (m.success) {if(!ready){socket.close(1008,'Hello required');return;}await transaction(async client => {
           await client.query(`UPDATE servers SET status='online',last_seen_at=now() WHERE id=$1`,[serverId]);
           // A 60-second bucket bounds write frequency; averages absorb multiple samples.
