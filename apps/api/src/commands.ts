@@ -113,7 +113,7 @@ async function releaseOwnerLease(serverId:string){
 export async function attachAgent(serverId:string,socket:WebSocket):Promise<boolean> {
   if(active.has(serverId)) return false;
   if(!await claimOwnerLease(serverId))return false;
-  if(active.has(serverId)){await releaseOwnerLease(serverId);return false;}
+  if(active.has(serverId))return false;
   const connection:Connection={socket,pending:new Map()};
   if(routerRedis){
     connection.leaseTimer=setInterval(()=>void refreshOwnerLease(serverId).catch(()=>{}),agentOwnerRefreshMs);
