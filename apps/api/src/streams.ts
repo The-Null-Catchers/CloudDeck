@@ -3,7 +3,8 @@ import type {FastifyInstance} from 'fastify';
 import {z} from 'zod';
 import {pool} from './db.js';
 import {authenticate,membership,audit,digest,randomToken} from './security.js';
-import {containerId,registerAgentStream,sendAgentEnvelope,unregisterAgentStream} from './commands.js';
+import {containerId,registerAgentStream,unregisterAgentStream} from './commands.js';
+import {registerRealtimeRoute,routeAgentRealtimeEnvelope,unregisterRealtimeRoute} from './realtime-router.js';
 
 const params=z.object({serverId:z.uuid()});
 const serviceName=z.string().regex(/^[A-Za-z0-9@_.:-]+\.service$/);
@@ -45,24 +46,33 @@ export async function streamRoutes(app:FastifyInstance){
     if(!ticket || ticket.expiresAt<=Date.now()){socket.close(1008,'Expired ticket');return;}
     const subscriptionId=randomUUID();
     let closed=false;
-    const closeStream=()=>{
-      if(closed)return;closed=true;
-      unregisterAgentStream(ticket.serverId,subscriptionId);
-      try{sendAgentEnvelope(ticket.serverId,{type:'stream.unsubscribe',subscriptionId});}catch{return;}
-    };
-    registerAgentStream(ticket.serverId,subscriptionId,message=>{
+    const deliver=(message:{line?:string;error?:string;done?:boolean})=>{
       if(socket.readyState!==1)return;
       socket.send(JSON.stringify({type:'log',subscriptionId,line:message.line,error:message.error,done:message.done}));
-      if(message.done||message.error)closeStream();
-    });
-    socket.on('close',closeStream);
-    socket.on('error',closeStream);
-    try{
-      sendAgentEnvelope(ticket.serverId,{type:'stream.subscribe',subscriptionId,source:ticket.source,target:ticket.target,tail:ticket.tail});
-      socket.send(JSON.stringify({type:'ready',subscriptionId}));
-    }catch{
+      if(message.done||message.error)void closeStream();
+    };
+    const closeStream=async()=>{
+      if(closed)return;closed=true;
       unregisterAgentStream(ticket.serverId,subscriptionId);
-      socket.close(1011,'Agent unavailable');
-    }
+      await unregisterRealtimeRoute(subscriptionId).catch(()=>{});
+      await routeAgentRealtimeEnvelope(ticket.serverId,subscriptionId,{type:'stream.unsubscribe',subscriptionId}).catch(()=>{});
+    };
+    registerAgentStream(ticket.serverId,subscriptionId,deliver);
+    socket.on('close',()=>{void closeStream();});
+    socket.on('error',()=>{void closeStream();});
+    void (async()=>{
+      try{
+        await registerRealtimeRoute(subscriptionId,message=>{
+          if(message.type!=='agent.realtime.stream'||message.serverId!==ticket.serverId||message.subscriptionId!==subscriptionId)return;
+          deliver(message);
+        });
+        await routeAgentRealtimeEnvelope(ticket.serverId,subscriptionId,{type:'stream.subscribe',subscriptionId,source:ticket.source,target:ticket.target,tail:ticket.tail});
+        if(socket.readyState===1)socket.send(JSON.stringify({type:'ready',subscriptionId}));
+      }catch{
+        unregisterAgentStream(ticket.serverId,subscriptionId);
+        await unregisterRealtimeRoute(subscriptionId).catch(()=>{});
+        socket.close(1011,'Agent unavailable');
+      }
+    })();
   });
 }
