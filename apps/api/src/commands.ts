@@ -147,7 +147,7 @@ export function resolveAgentResult(serverId:string,message:unknown):boolean {
   return true;
 }
 
-function sendLocalAgentCommand(serverId:string,action:AgentAction,payload:object,timeoutMs:number,requestId=randomUUID()):Promise<unknown>{
+function sendLocalAgentCommand(serverId:string,action:AgentAction,payload:object,timeoutMs:number,requestId:string=randomUUID()):Promise<unknown>{
   const connection=active.get(serverId);
   if(!connection || connection.socket.readyState!==1)throw Object.assign(new Error('Agent not connected'),{statusCode:503});
   return new Promise((resolve,reject)=>{
