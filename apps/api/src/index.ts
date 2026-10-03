@@ -31,6 +31,7 @@ import {startDeploymentQueueReconciler,closeDeploymentQueue} from './deployment-
 import {startDeploymentWorker,closeDeploymentWorker} from './deployment-worker.js';
 import {startNotificationQueueReconciler,closeNotificationQueue} from './notification-queue.js';
 import {startNotificationWorker,closeNotificationWorker} from './notification-worker.js';
+import {closeAgentRouter} from './commands.js';
 import './security.js';
 import { startOfflineSweep } from './offline.js';
 import {startMetricRollupRunner} from './metrics-retention.js';
@@ -94,6 +95,7 @@ if (process.env.NODE_ENV !== 'test') {
     stopNotificationQueueReconciler();
     stopBackupRunner();
     stopMetricRollupRunner();
+    await closeAgentRouter();
     await closeNotificationWorker();
     await closeNotificationQueue();
     await closeDeploymentWorker();
