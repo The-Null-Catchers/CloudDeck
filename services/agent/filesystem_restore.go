@@ -53,7 +53,9 @@ func filesystemRestoreArchivePath(ctx context.Context,payload filesystemRestoreP
   if payload.StorageKey!=expectedKey||payload.S3!=nil{return "",func(){},errors.New("invalid local restore storage key")}
   path,err:=localBackupArchivePath(payload.StorageKey)
   if err!=nil{return "",func(){},err}
-  return path,func(){},nil
+  prepared,cleanup,err:=prepareBackupArchiveForRestore(path,payload.ExpectedSHA256)
+  if err!=nil{return "",func(){},err}
+  return prepared,cleanup,nil
  }
  if payload.TargetType!="s3"{return "",func(){},errors.New("unsupported restore target")}
  if err:=validateS3BackupConfig(payload.S3);err!=nil{return "",func(){},err}
