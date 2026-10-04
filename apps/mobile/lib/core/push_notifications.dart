@@ -57,6 +57,24 @@ Future<void> cloudDeckFirebaseBackgroundHandler(RemoteMessage message) async {
   }
 }
 
+final class PushNavigationIntent {
+  const PushNavigationIntent({required this.type, this.href});
+  final String type;
+  final String? href;
+
+  factory PushNavigationIntent.fromData(Map<String, dynamic> data) {
+    final rawType = data['type'];
+    final rawHref = data['href'];
+    return PushNavigationIntent(
+      type: rawType is String && rawType.isNotEmpty ? rawType : 'info',
+      href: rawHref is String && rawHref.isNotEmpty ? rawHref : null,
+    );
+  }
+
+  factory PushNavigationIntent.fromMessage(RemoteMessage message) =>
+      PushNavigationIntent.fromData(message.data);
+}
+
 final class PushNotificationService {
   PushNotificationService({
     required this.api,
@@ -68,15 +86,25 @@ final class PushNotificationService {
   final ApiClient api;
   final FlutterSecureStorage _storage;
   final StreamController<void> _activity = StreamController<void>.broadcast();
+  final StreamController<PushNavigationIntent> _navigation =
+      StreamController<PushNavigationIntent>.broadcast();
   StreamSubscription<String>? _tokenSubscription;
   StreamSubscription<RemoteMessage>? _foregroundSubscription;
   StreamSubscription<RemoteMessage>? _openedSubscription;
   FirebaseMessaging? _messaging;
+  PushNavigationIntent? _pendingNavigation;
   bool _initialized = false;
   bool _signedIn = false;
 
   Stream<void> get activity => _activity.stream;
+  Stream<PushNavigationIntent> get navigation => _navigation.stream;
   bool get available => CloudDeckFirebaseOptions.configured;
+
+  PushNavigationIntent? takePendingNavigation() {
+    final value = _pendingNavigation;
+    _pendingNavigation = null;
+    return value;
+  }
 
   Future<bool> configureForSignedInUser() async {
     _signedIn = true;
@@ -102,6 +130,7 @@ final class PushNotificationService {
 
   Future<void> unregisterCurrentDevice() async {
     _signedIn = false;
+    _pendingNavigation = null;
     final deviceId = await _storage.read(key: _deviceIdKey);
     if (deviceId == null || deviceId.isEmpty) return;
     try {
@@ -136,10 +165,20 @@ final class PushNotificationService {
       }
     });
     _foregroundSubscription = FirebaseMessaging.onMessage.listen((_) => _activity.add(null));
-    _openedSubscription = FirebaseMessaging.onMessageOpenedApp.listen((_) => _activity.add(null));
+    _openedSubscription = FirebaseMessaging.onMessageOpenedApp.listen(_handleOpenedMessage);
     final initialMessage = await messaging.getInitialMessage();
-    if (initialMessage != null) _activity.add(null);
+    if (initialMessage != null) _handleOpenedMessage(initialMessage);
     _initialized = true;
+  }
+
+  void _handleOpenedMessage(RemoteMessage message) {
+    final intent = PushNavigationIntent.fromMessage(message);
+    _activity.add(null);
+    _pendingNavigation = intent;
+    if (_navigation.hasListener) {
+      _pendingNavigation = null;
+      _navigation.add(intent);
+    }
   }
 
   Future<void> _registerToken(String token) async {
@@ -162,9 +201,11 @@ final class PushNotificationService {
 
   Future<void> dispose() async {
     _signedIn = false;
+    _pendingNavigation = null;
     await _tokenSubscription?.cancel();
     await _foregroundSubscription?.cancel();
     await _openedSubscription?.cancel();
     await _activity.close();
+    await _navigation.close();
   }
 }
