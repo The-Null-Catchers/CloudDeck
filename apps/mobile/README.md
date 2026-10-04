@@ -16,7 +16,8 @@ Flutter client for monitoring and emergency operations.
 - open-alert acknowledgement
 - deployment status/history
 - notification center/read state
-- optional Firebase Cloud Messaging registration on Android/iOS, token rotation handling, foreground refresh, notification-open refresh, and best-effort server deregistration on logout
+- optional Firebase Cloud Messaging registration on Android/iOS, token rotation handling, foreground refresh, notification-open navigation, and best-effort server deregistration on logout
+- cold-start push intents buffered until the authenticated shell is ready
 - light/dark theme
 
 The mobile app intentionally does not expose browser terminal access in this phase. It focuses on monitoring and constrained emergency operations.
@@ -40,7 +41,7 @@ Native runner files are reproducibly generated with:
 ./tool/bootstrap_ios.sh
 ```
 
-Both platforms use the application identifier `org.clouddeck.mobile`. The generated Android release manifest disallows cleartext HTTP. Debug Android builds override cleartext only for local emulator/development use.
+Both platforms use the application identifier `org.clouddeck.mobile`. The generated Android release manifest disallows cleartext HTTP and declares Android 13+ `POST_NOTIFICATIONS`; runtime notification permission is requested only after a CloudDeck user is authenticated. Debug Android builds override cleartext only for local emulator/development use.
 
 ## Push notifications
 
@@ -60,6 +61,8 @@ For iOS use `CLOUDDECK_FIREBASE_IOS_APP_ID` and `CLOUDDECK_FIREBASE_IOS_API_KEY`
 The backend FCM service-account private key is separate from these client identifiers and must never be embedded in the app. iOS distribution also requires the App ID/provisioning profile to have the Push Notifications capability and Firebase/APNs credentials configured outside this repository.
 
 On sign-in/session restore, the app asks for notification permission, obtains the FCM token, and registers it through the authenticated CloudDeck API. Token rotations are re-registered automatically. Logout attempts to remove the server-side device record before revoking the session; if that removal cannot be completed, the local FCM token is invalidated as a privacy fallback.
+
+Opening a CloudDeck push uses only the bounded `type` and optional `href` emitted by the backend. Known server targets open the matching server detail screen; alert and deployment targets select their operational tab. Unknown targets fall back to the notification inbox rather than launching arbitrary external URLs. Cold-start notification intents are retained until the signed-in shell has subscribed, preventing notification taps from being lost during session restore.
 
 CI builds a release-mode smoke APK on Linux and an unsigned release-mode iOS app on macOS against a non-routable HTTPS placeholder API. Firebase defines are intentionally omitted in CI, so push remains disabled while the native Firebase plugins still compile. The artifacts are short-lived validation outputs and are **not store-signed**. App Store/TestFlight signing credentials, provisioning profiles, and distribution certificates must stay in CI secret storage and are intentionally not committed to the repository.
 
