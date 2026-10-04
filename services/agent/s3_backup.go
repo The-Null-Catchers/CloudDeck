@@ -298,7 +298,15 @@ func localBackupArchivePath(storageKey string)(string,error){
 func executeBackup(ctx context.Context,payload backupExecutePayload)(backupExecutionResult,error){
  if payload.TargetType=="local"{
   if payload.S3!=nil{return backupExecutionResult{},errors.New("unexpected S3 configuration for local backup")}
-  return executeLocalBackup(ctx,payload)
+  result,err:=executeLocalBackup(ctx,payload)
+  if err!=nil{return backupExecutionResult{},err}
+  path,err:=localBackupArchivePath(result.StorageKey)
+  if err!=nil{_ = deleteLocalBackup(result.StorageKey);return backupExecutionResult{},err}
+  size,err:=encryptLocalBackupAtRest(path)
+  if err!=nil{_ = deleteLocalBackup(result.StorageKey);return backupExecutionResult{},err}
+  result.SizeBytes=size
+  result.Verified=true
+  return result,nil
  }
  if payload.TargetType!="s3"{return backupExecutionResult{},errors.New("unsupported backup target")}
  if err:=validateS3BackupConfig(payload.S3);err!=nil{return backupExecutionResult{},err}
