@@ -32,10 +32,10 @@ function notificationQueue(){
 export function notificationQueueJob(id:string|number){
   const data=notificationJob.parse({deliveryId:String(id)});
   return {
-    name:'email',
+    name:'delivery',
     data,
     options:{
-      jobId:`email-${data.deliveryId}`,
+      jobId:`notification-${data.deliveryId}`,
       attempts:5,
       backoff:{type:'exponential' as const,delay:10_000},
       removeOnComplete:{count:2000},
