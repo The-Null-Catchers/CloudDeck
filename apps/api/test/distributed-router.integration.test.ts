@@ -6,7 +6,8 @@ import {once} from 'node:events';
 
 const redisUrl=process.env.REDIS_URL;
 
-function peer(role:'owner'|'requester'|'duplicate',serverId:string,instanceId:string){
+type PeerRole='owner'|'requester'|'realtime-requester'|'duplicate';
+function peer(role:PeerRole,serverId:string,instanceId:string){
   return spawn(process.execPath,['--import','tsx','test/fixtures/distributed-router-peer.ts'],{
     cwd:new URL('..',import.meta.url),
     env:{
@@ -70,6 +71,27 @@ test('routes commands to the owning API process and rejects duplicate ownership'
     const result=JSON.parse(line) as {handledBy:string;action:string};
     assert.equal(result.handledBy,'integration-owner');
     assert.equal(result.action,'docker.listContainers');
+    await once(requester,'exit');
+    assert.equal(requester.exitCode,0);
+  }finally{
+    await stop(owner);
+  }
+});
+
+test('routes live logs and bidirectional terminal traffic across API processes',{skip:!redisUrl,timeout:25_000},async()=>{
+  const serverId=randomUUID();
+  const owner=peer('owner',serverId,'realtime-owner');
+  try{
+    assert.equal(await waitForLine(owner,'READY:'),'READY:true');
+    const requester=peer('realtime-requester',serverId,'realtime-requester');
+    const line=await waitForLine(requester,'{',12_000);
+    const result=JSON.parse(line) as {received:string[]};
+    assert.deepEqual(result.received,[
+      'log:distributed-log-line',
+      'terminal:shell-ready',
+      'terminal:echo:whoami\n',
+      'terminal:resize:120x40'
+    ]);
     await once(requester,'exit');
     assert.equal(requester.exitCode,0);
   }finally{
