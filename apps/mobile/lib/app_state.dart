@@ -83,8 +83,8 @@ final class AppState extends ChangeNotifier {
   Future<void> logout() async {
     loading=true;notifyListeners();
     try {
-      await push.unregisterCurrentDevice();
-      await api.logout();
+      try {await push.unregisterCurrentDevice();}
+      finally {await api.logout();}
     } finally {
       sessionStatus=SessionStatus.signedOut;twoFactorChallenge=null;organization=null;organizations=const [];servers=const [];
       alerts=const [];deployments=const [];notifications=const [];loading=false;notifyListeners();
