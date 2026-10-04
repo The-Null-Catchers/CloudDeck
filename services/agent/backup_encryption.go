@@ -8,6 +8,7 @@ import (
  "crypto/sha256"
  "encoding/base64"
  "encoding/binary"
+ "encoding/hex"
  "errors"
  "io"
  "os"
@@ -25,6 +26,21 @@ func backupEncryptionKey()([]byte,bool,error){
  key,err:=base64.StdEncoding.DecodeString(raw)
  if err!=nil||len(key)!=32{return nil,false,errors.New("CLOUDDECK_BACKUP_ENCRYPTION_KEY must be base64 for exactly 32 bytes")}
  return key,true,nil
+}
+
+func encryptedBackupMaxBytes()int64{
+ plain:=backupMaxBytes()
+ chunks:=plain/int64(backupEncryptionChunkSize)+2
+ return plain+chunks*32+4096
+}
+
+func backupFileSHA256(path string)(string,error){
+ file,err:=os.Open(path)
+ if err!=nil{return "",err}
+ defer file.Close()
+ hash:=sha256.New()
+ if _,err:=io.Copy(hash,io.LimitReader(file,encryptedBackupMaxBytes()+1));err!=nil{return "",err}
+ return hex.EncodeToString(hash.Sum(nil)),nil
 }
 
 func deriveBackupEncryptionKey(master,salt []byte)[]byte{
