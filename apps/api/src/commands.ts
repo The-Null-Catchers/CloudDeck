@@ -10,12 +10,13 @@ export const agentResult = z.discriminatedUnion('success',[
   z.object({type:z.literal('command.result'),requestId:z.uuid(),success:z.literal(false),error:z.string().max(200)})
 ]);
 type Pending={resolve:(value:unknown)=>void;reject:(reason:Error)=>void;timer:ReturnType<typeof setTimeout>};
-type Connection={socket:WebSocket;pending:Map<string,Pending>;leaseTimer?:ReturnType<typeof setInterval>};
+type Connection={socket:WebSocket;pending:Map<string,Pending>;leaseTimer?:ReturnType<typeof setInterval>;lastLeaseConfirmedAt:number};
 const active=new Map<string,Connection>();
 
 const instanceId=(process.env.CLOUDDECK_INSTANCE_ID?.trim()||randomUUID()).slice(0,128);
 const agentOwnerTtlSeconds=120;
 const agentOwnerRefreshMs=30_000;
+const agentLeaseGraceMs=agentOwnerTtlSeconds*1000;
 let routerRedis:Redis|null=null;
 let routerSubscriber:Redis|null=null;
 let routerReady:Promise<boolean>|null=null;
@@ -90,13 +91,14 @@ async function claimOwnerLease(serverId:string){
   return true;
 }
 
-async function refreshOwnerLease(serverId:string){
+async function refreshOwnerLease(serverId:string):Promise<boolean>{
   const redis=routerRedis;
-  if(!redis)return;
-  await redis.eval(
+  if(!redis)return false;
+  const result=await redis.eval(
     `if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('expire',KEYS[1],ARGV[2]) else return 0 end`,
     1,ownerKey(serverId),instanceId,String(agentOwnerTtlSeconds)
   );
+  return Number(result)===1;
 }
 
 async function releaseOwnerLease(serverId:string){
@@ -110,13 +112,35 @@ async function releaseOwnerLease(serverId:string){
   }catch{void 0;}
 }
 
+function fenceAgent(serverId:string,connection:Connection,reason:string){
+  if(active.get(serverId)!==connection)return;
+  if(connection.leaseTimer)clearInterval(connection.leaseTimer);
+  for(const entry of connection.pending.values()){clearTimeout(entry.timer);entry.reject(Object.assign(new Error(reason),{statusCode:503}));}
+  connection.pending.clear();
+  active.delete(serverId);
+  try{connection.socket.close(1012,reason.slice(0,120));}catch{void 0;}
+}
+
+async function maintainOwnerLease(serverId:string,connection:Connection){
+  if(active.get(serverId)!==connection)return;
+  try{
+    if(await refreshOwnerLease(serverId)){
+      connection.lastLeaseConfirmedAt=Date.now();
+      return;
+    }
+    fenceAgent(serverId,connection,'Agent ownership lease lost');
+  }catch{
+    if(Date.now()-connection.lastLeaseConfirmedAt>=agentLeaseGraceMs)fenceAgent(serverId,connection,'Agent ownership lease expired');
+  }
+}
+
 export async function attachAgent(serverId:string,socket:WebSocket):Promise<boolean> {
   if(active.has(serverId)) return false;
   if(!await claimOwnerLease(serverId))return false;
   if(active.has(serverId))return false;
-  const connection:Connection={socket,pending:new Map()};
+  const connection:Connection={socket,pending:new Map(),lastLeaseConfirmedAt:Date.now()};
   if(routerRedis){
-    connection.leaseTimer=setInterval(()=>void refreshOwnerLease(serverId).catch(()=>{}),agentOwnerRefreshMs);
+    connection.leaseTimer=setInterval(()=>void maintainOwnerLease(serverId,connection),agentOwnerRefreshMs);
     connection.leaseTimer.unref();
   }
   active.set(serverId,connection);
@@ -131,6 +155,7 @@ export function detachAgent(serverId:string,socket:WebSocket) {
   if(!connection || connection.socket!==socket)return;
   if(connection.leaseTimer)clearInterval(connection.leaseTimer);
   for(const entry of connection.pending.values()){clearTimeout(entry.timer);entry.reject(new Error('Agent disconnected'));}
+  connection.pending.clear();
   active.delete(serverId);
   void releaseOwnerLease(serverId);
 }
@@ -250,7 +275,6 @@ export function resolveAgentStream(serverId:string,message:unknown):boolean{
   return true;
 }
 
-
 export type DeploymentProgressStage='cloning'|'building'|'deploying'|'health-checking';
 type DeploymentProgressMessage={deploymentId:string;stage:DeploymentProgressStage;message?:string};
 type DeploymentProgressHandler=(message:DeploymentProgressMessage)=>void|Promise<void>;
@@ -276,7 +300,6 @@ export function resolveDeploymentProgress(message:unknown):boolean{
   void Promise.resolve(handler(parsed.data)).catch(()=>{});
   return true;
 }
-
 
 export type DeploymentLogStage='cloning'|'building'|'deploying'|'health-checking';
 export type DeploymentLogStream='system'|'build'|'stdout'|'stderr';
@@ -311,7 +334,13 @@ export function resolveDeploymentLog(message:unknown):boolean{
 }
 
 export async function closeAgentRouter(){
-  for(const connection of active.values())if(connection.leaseTimer)clearInterval(connection.leaseTimer);
+  for(const [serverId,connection] of active){
+    if(connection.leaseTimer)clearInterval(connection.leaseTimer);
+    for(const entry of connection.pending.values()){clearTimeout(entry.timer);entry.reject(new Error('Agent router shutting down'));}
+    connection.pending.clear();
+    try{connection.socket.close(1012,'Server shutting down');}catch{void 0;}
+    active.delete(serverId);
+  }
   for(const entry of remotePending.values()){clearTimeout(entry.timer);entry.reject(new Error('Agent router shutting down'));}
   remotePending.clear();
   const subscriber=routerSubscriber;
