@@ -92,6 +92,10 @@ final class ApiClient {
   Future<dynamic> get(String path) => _authorized('GET', path);
   Future<dynamic> post(String path, {Object? body}) =>
       _authorized('POST', path, body: body);
+  Future<dynamic> put(String path, {Object? body}) =>
+      _authorized('PUT', path, body: body);
+  Future<dynamic> delete(String path, {Object? body}) =>
+      _authorized('DELETE', path, body: body);
 
   Future<dynamic> _authorized(
     String method,
@@ -186,6 +190,16 @@ final class ApiClient {
       return switch (method) {
         'GET' => await _client.get(uri, headers: headers),
         'POST' => await _client.post(
+            uri,
+            headers: headers,
+            body: body == null ? null : jsonEncode(body),
+          ),
+        'PUT' => await _client.put(
+            uri,
+            headers: headers,
+            body: body == null ? null : jsonEncode(body),
+          ),
+        'DELETE' => await _client.delete(
             uri,
             headers: headers,
             body: body == null ? null : jsonEncode(body),
