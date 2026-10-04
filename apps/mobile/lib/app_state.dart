@@ -1,13 +1,21 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'core/api_client.dart';
+import 'core/push_notifications.dart';
 import 'models.dart';
 
 enum SessionStatus { booting, signedOut, signedIn }
 
 final class AppState extends ChangeNotifier {
-  AppState(this.api);
+  AppState(this.api,this.push){
+    _pushActivity=push.activity.listen((_){
+      if(sessionStatus==SessionStatus.signedIn&&!loading)unawaited(refreshOverview());
+    });
+  }
   final ApiClient api;
+  final PushNotificationService push;
+  late final StreamSubscription<void> _pushActivity;
   SessionStatus sessionStatus=SessionStatus.booting;
   bool loading=false;
   String? error;
@@ -28,6 +36,7 @@ final class AppState extends ChangeNotifier {
       if(!await api.restoreSession()){sessionStatus=SessionStatus.signedOut;return;}
       sessionStatus=SessionStatus.signedIn;
       await refreshOverview();
+      unawaited(push.configureForSignedInUser());
     } on Object {sessionStatus=SessionStatus.signedOut;}
     finally {notifyListeners();}
   }
@@ -44,6 +53,7 @@ final class AppState extends ChangeNotifier {
       twoFactorChallenge=null;
       sessionStatus=SessionStatus.signedIn;
       await refreshOverview();
+      unawaited(push.configureForSignedInUser());
     } on ApiException catch(exception) {error=exception.message;sessionStatus=SessionStatus.signedOut;}
     finally {loading=false;notifyListeners();}
   }
@@ -57,6 +67,7 @@ final class AppState extends ChangeNotifier {
       twoFactorChallenge=null;
       sessionStatus=SessionStatus.signedIn;
       await refreshOverview();
+      unawaited(push.configureForSignedInUser());
     } on ApiException catch(exception){
       error=exception.message;
       sessionStatus=SessionStatus.signedOut;
@@ -71,8 +82,10 @@ final class AppState extends ChangeNotifier {
 
   Future<void> logout() async {
     loading=true;notifyListeners();
-    try {await api.logout();}
-    finally {
+    try {
+      await push.unregisterCurrentDevice();
+      await api.logout();
+    } finally {
       sessionStatus=SessionStatus.signedOut;twoFactorChallenge=null;organization=null;organizations=const [];servers=const [];
       alerts=const [];deployments=const [];notifications=const [];loading=false;notifyListeners();
     }
@@ -132,6 +145,14 @@ final class AppState extends ChangeNotifier {
 
   Future<void> acknowledgeAlert(String alertId) async {await api.post('/api/v1/alerts/$alertId/acknowledge');await refreshOverview();}
   Future<void> markNotificationRead(String notificationId) async {await api.post('/api/v1/notifications/$notificationId/read');await refreshOverview();}
+
+  @override
+  void dispose(){
+    unawaited(_pushActivity.cancel());
+    unawaited(push.dispose());
+    api.close();
+    super.dispose();
+  }
 }
 
 extension<T> on List<T>{T? get firstOrNull=>isEmpty?null:first;}
