@@ -68,3 +68,26 @@ jobs:
           path: apps/mobile/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 7
+
+  mobile-ios:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.6'
+          channel: stable
+          cache: true
+      - run: chmod +x tool/bootstrap_ios.sh
+      - run: ./tool/bootstrap_ios.sh
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign --dart-define=CLOUDDECK_API_URL=https://api.example.invalid
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clouddeck-ios-release-smoke
+          path: apps/mobile/build/ios/iphoneos/Runner.app
+          if-no-files-found: error
+          retention-days: 7
