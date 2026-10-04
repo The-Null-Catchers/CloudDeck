@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../app_state.dart';
+import '../core/push_notifications.dart';
 import 'alerts_screen.dart';
 import 'dashboard_screen.dart';
 import 'deployments_screen.dart';
 import 'notifications_screen.dart';
+import 'server_detail_screen.dart';
 import 'servers_screen.dart';
 
 final class ShellScreen extends StatefulWidget {
@@ -13,6 +17,57 @@ final class ShellScreen extends StatefulWidget {
 }
 final class _ShellScreenState extends State<ShellScreen>{
   int _index=0;
+  StreamSubscription<PushNavigationIntent>? _pushNavigation;
+
+  @override
+  void initState(){
+    super.initState();
+    _pushNavigation=widget.state.push.navigation.listen(_openPushIntent);
+    final pending=widget.state.push.takePendingNavigation();
+    if(pending!=null){
+      WidgetsBinding.instance.addPostFrameCallback((_){if(mounted)_openPushIntent(pending);});
+    }
+  }
+
+  void _openPushIntent(PushNavigationIntent intent){
+    if(!mounted)return;
+    final uri=intent.href==null?null:Uri.tryParse(intent.href!);
+    final segments=uri?.pathSegments.where((segment)=>segment.isNotEmpty).toList(growable:false)??const <String>[];
+    final serverIndex=segments.indexOf('servers');
+    if(serverIndex>=0){
+      setState(()=>_index=1);
+      final serverId=serverIndex+1<segments.length?segments[serverIndex+1]:null;
+      if(serverId!=null){
+        final matches=widget.state.servers.where((server)=>server.id==serverId);
+        if(matches.isNotEmpty){
+          Navigator.of(context).push(MaterialPageRoute(
+            builder:(_)=>ServerDetailScreen(state:widget.state,server:matches.first),
+          ));
+        }
+      }
+      return;
+    }
+    if(segments.contains('deployments')||intent.type=='deployment'){
+      setState(()=>_index=3);
+      return;
+    }
+    if(segments.contains('alerts')||const {'critical','warning'}.contains(intent.type)){
+      setState(()=>_index=2);
+      return;
+    }
+    if(segments.contains('notifications')){
+      setState(()=>_index=4);
+      return;
+    }
+    setState(()=>_index=4);
+  }
+
+  @override
+  void dispose(){
+    unawaited(_pushNavigation?.cancel());
+    super.dispose();
+  }
+
   @override Widget build(BuildContext context){
     final pages=[
       DashboardScreen(state:widget.state,onOpenServers:()=>setState(()=>_index=1),onOpenAlerts:()=>setState(()=>_index=2)),
