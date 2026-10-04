@@ -44,7 +44,9 @@ func restoreArchivePath(ctx context.Context,payload databaseRestorePayload)(stri
   if payload.StorageKey!=expectedKey||payload.S3!=nil{return "",func(){},errors.New("invalid local restore storage key")}
   path,err:=localBackupArchivePath(payload.StorageKey)
   if err!=nil{return "",func(){},err}
-  return path,func(){},nil
+  prepared,cleanup,err:=prepareBackupArchiveForRestore(path,payload.ExpectedSHA256)
+  if err!=nil{return "",func(){},err}
+  return prepared,cleanup,nil
  }
  if payload.TargetType!="s3"{return "",func(){},errors.New("unsupported restore target")}
  if err:=validateS3BackupConfig(payload.S3);err!=nil{return "",func(){},err}
@@ -188,5 +190,5 @@ func executeDatabaseRestoreCommand(ctx context.Context,command agentCommand,writ
  if err:=restoreDatabase(ctx,payload);err!=nil{result.Error=err.Error();_ = write(result);return}
  result.Success=true
  result.Data=map[string]bool{"restored":true}
- _ = write(result)
+ _=write(result)
 }
