@@ -16,6 +16,7 @@ Flutter client for monitoring and emergency operations.
 - open-alert acknowledgement
 - deployment status/history
 - notification center/read state
+- optional Firebase Cloud Messaging registration on Android/iOS, token rotation handling, foreground refresh, notification-open refresh, and best-effort server deregistration on logout
 - light/dark theme
 
 The mobile app intentionally does not expose browser terminal access in this phase. It focuses on monitoring and constrained emergency operations.
@@ -41,6 +42,25 @@ Native runner files are reproducibly generated with:
 
 Both platforms use the application identifier `org.clouddeck.mobile`. The generated Android release manifest disallows cleartext HTTP. Debug Android builds override cleartext only for local emulator/development use.
 
-CI builds a release-mode smoke APK on Linux and an unsigned release-mode iOS app on macOS against a non-routable HTTPS placeholder API. The artifacts are short-lived validation outputs and are **not store-signed**. App Store/TestFlight signing credentials, provisioning profiles, and distribution certificates must stay in CI secret storage and are intentionally not committed to the repository.
+## Push notifications
 
-Never embed production API secrets or refresh tokens in build-time configuration.
+Push support is disabled automatically when Firebase client configuration is absent. Release builds can inject the non-secret Firebase client identifiers with Dart defines instead of committing `google-services.json` or `GoogleService-Info.plist`:
+
+```bash
+flutter run \
+  --dart-define=CLOUDDECK_API_URL=https://api.example.com \
+  --dart-define=CLOUDDECK_FIREBASE_PROJECT_ID=your-project \
+  --dart-define=CLOUDDECK_FIREBASE_MESSAGING_SENDER_ID=123456789 \
+  --dart-define=CLOUDDECK_FIREBASE_ANDROID_APP_ID=1:123456789:android:example \
+  --dart-define=CLOUDDECK_FIREBASE_ANDROID_API_KEY=example-public-client-key
+```
+
+For iOS use `CLOUDDECK_FIREBASE_IOS_APP_ID` and `CLOUDDECK_FIREBASE_IOS_API_KEY` instead of the Android-specific values. The Firebase project and messaging sender ID are shared.
+
+The backend FCM service-account private key is separate from these client identifiers and must never be embedded in the app. iOS distribution also requires the App ID/provisioning profile to have the Push Notifications capability and Firebase/APNs credentials configured outside this repository.
+
+On sign-in/session restore, the app asks for notification permission, obtains the FCM token, and registers it through the authenticated CloudDeck API. Token rotations are re-registered automatically. Logout attempts to remove the server-side device record before revoking the session; if that removal cannot be completed, the local FCM token is invalidated as a privacy fallback.
+
+CI builds a release-mode smoke APK on Linux and an unsigned release-mode iOS app on macOS against a non-routable HTTPS placeholder API. Firebase defines are intentionally omitted in CI, so push remains disabled while the native Firebase plugins still compile. The artifacts are short-lived validation outputs and are **not store-signed**. App Store/TestFlight signing credentials, provisioning profiles, and distribution certificates must stay in CI secret storage and are intentionally not committed to the repository.
+
+Never embed production API secrets, refresh tokens, service-account credentials, or APNs private keys in build-time configuration.

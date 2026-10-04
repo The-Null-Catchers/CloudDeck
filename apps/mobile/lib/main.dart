@@ -1,6 +1,8 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'app_state.dart';
 import 'core/api_client.dart';
+import 'core/push_notifications.dart';
 import 'core/session_store.dart';
 import 'screens/login_screen.dart';
 import 'screens/shell_screen.dart';
@@ -8,7 +10,11 @@ import 'theme.dart';
 
 void main(){
   WidgetsFlutterBinding.ensureInitialized();
-  final state=AppState(ApiClient(sessionStore:SecureSessionStore()));
+  FirebaseMessaging.onBackgroundMessage(cloudDeckFirebaseBackgroundHandler);
+  final sessionStore=SecureSessionStore();
+  final api=ApiClient(sessionStore:sessionStore);
+  final push=PushNotificationService(api:api);
+  final state=AppState(api,push);
   runApp(CloudDeckApp(state:state));
   state.bootstrap();
 }

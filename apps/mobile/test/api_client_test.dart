@@ -61,4 +61,29 @@ void main(){
     expect(store.token,isNull);
     api.close();
   });
+
+  test('authorized PUT and DELETE use the active access token',() async {
+    final store=MemorySessionStore();
+    final methods=<String>[];
+    final client=MockClient((request) async {
+      if(request.url.path=='/api/v1/auth/mobile/login'){
+        return http.Response(jsonEncode({'accessToken':'access-1','refreshToken':'refresh-1'}),200,headers:{'content-type':'application/json'});
+      }
+      expect(request.headers['authorization'],'Bearer access-1');
+      methods.add(request.method);
+      if(request.method=='PUT'){
+        expect(jsonDecode(request.body),{'provider':'fcm'});
+        return http.Response(jsonEncode({'device':{'id':'device-1'}}),200,headers:{'content-type':'application/json'});
+      }
+      if(request.method=='DELETE')return http.Response('',204);
+      return http.Response('not found',404);
+    });
+    final api=ApiClient(sessionStore:store,client:client,baseUrl:'https://clouddeck.test');
+    await api.login(email:'user@example.com',password:'secure passphrase 2026',deviceName:'test');
+    final registered=await api.put('/api/v1/push-devices',body:{'provider':'fcm'}) as Map<String,dynamic>;
+    expect((registered['device'] as Map<String,dynamic>)['id'],'device-1');
+    expect(await api.delete('/api/v1/push-devices/device-1'),isNull);
+    expect(methods,['PUT','DELETE']);
+    api.close();
+  });
 }
