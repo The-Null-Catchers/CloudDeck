@@ -1,9 +1,9 @@
 import {randomUUID} from 'node:crypto';
 import {Redis} from 'ioredis';
 import {z} from 'zod';
-import {sendAgentEnvelope} from './commands.js';
+import {agentRouterInstanceId,resolveAgentOwnerInstance,sendAgentEnvelope} from './commands.js';
 
-const controlChannel='clouddeck:agent-realtime-control';
+const controlPrefix='clouddeck:agent-realtime-control:';
 const routePrefix='clouddeck:agent-realtime:';
 const uuid=z.uuid();
 const routeEnvelope=z.discriminatedUnion('type',[
@@ -19,6 +19,7 @@ const controlMessage=z.object({
   requestId:uuid,
   routeId:uuid,
   serverId:uuid,
+  requireAck:z.boolean(),
   envelope:routeEnvelope
 }).strict();
 const ackMessage=z.object({type:z.literal('agent.realtime.ack'),requestId:uuid}).strict();
@@ -39,6 +40,7 @@ type RouteMessage=z.infer<typeof streamData>|z.infer<typeof terminalData>;
 type RouteHandler=(message:RouteMessage)=>void;
 type PendingAck={routeId:string;resolve:()=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>};
 type RemoteRoute={routeId:string;expiresAt:number};
+type OutboundRoute={routeId:string;ownerInstanceId:string};
 
 const streamRouteTtlMs=2*60*60_000;
 const terminalRouteTtlMs=35*60_000;
@@ -51,6 +53,8 @@ const handlers=new Map<string,RouteHandler>();
 const pendingAcks=new Map<string,PendingAck>();
 const remoteStreams=new Map<string,RemoteRoute>();
 const remoteTerminals=new Map<string,RemoteRoute>();
+const outboundStreams=new Map<string,OutboundRoute>();
+const outboundTerminals=new Map<string,OutboundRoute>();
 
 function redisUrl(){
   if(process.env.NODE_ENV==='test'&&process.env.CLOUDDECK_TEST_DISTRIBUTED_ROUTING!=='1')return null;
@@ -61,6 +65,7 @@ function redisUrl(){
   return value;
 }
 function redisOptions(){return {maxRetriesPerRequest:1,enableOfflineQueue:false,connectTimeout:2000,lazyConnect:true} as const;}
+function controlChannel(instanceId:string){return controlPrefix+instanceId;}
 function routeChannel(routeId:string){return routePrefix+routeId;}
 function streamKey(serverId:string,subscriptionId:string){return `${serverId}:${subscriptionId}`;}
 function terminalKey(serverId:string,sessionId:string){return `${serverId}:${sessionId}`;}
@@ -74,12 +79,23 @@ function ensureCleanupTimer(){
   cleanupTimer=setInterval(cleanupStaleRoutes,routeSweepMs);
   cleanupTimer.unref();
 }
+function rememberOutbound(serverId:string,routeId:string,envelope:z.infer<typeof routeEnvelope>,ownerInstanceId:string){
+  if(envelope.type==='stream.subscribe')outboundStreams.set(streamKey(serverId,envelope.subscriptionId),{routeId,ownerInstanceId});
+  else if(envelope.type==='stream.unsubscribe')outboundStreams.delete(streamKey(serverId,envelope.subscriptionId));
+  else if(envelope.type==='terminal.open')outboundTerminals.set(terminalKey(serverId,envelope.sessionId),{routeId,ownerInstanceId});
+  else if(envelope.type==='terminal.close')outboundTerminals.delete(terminalKey(serverId,envelope.sessionId));
+}
+function cachedOwner(serverId:string,envelope:z.infer<typeof routeEnvelope>){
+  if(envelope.type==='stream.unsubscribe')return outboundStreams.get(streamKey(serverId,envelope.subscriptionId));
+  if(envelope.type==='terminal.input'||envelope.type==='terminal.resize'||envelope.type==='terminal.close')return outboundTerminals.get(terminalKey(serverId,envelope.sessionId));
+  return undefined;
+}
 
 async function handleControl(raw:string){
   cleanupStaleRoutes();
   let value:unknown;try{value=JSON.parse(raw);}catch{return;}
   const parsed=controlMessage.safeParse(value);if(!parsed.success)return;
-  const {requestId,routeId,serverId,envelope}=parsed.data;
+  const {requestId,routeId,serverId,requireAck,envelope}=parsed.data;
   try{sendAgentEnvelope(serverId,envelope);}catch{return;}
   if(envelope.type==='stream.subscribe')remoteStreams.set(streamKey(serverId,envelope.subscriptionId),route(routeId,streamRouteTtlMs));
   else if(envelope.type==='stream.unsubscribe')remoteStreams.delete(streamKey(serverId,envelope.subscriptionId));
@@ -89,7 +105,7 @@ async function handleControl(raw:string){
     const key=terminalKey(serverId,envelope.sessionId);const existing=remoteTerminals.get(key);
     if(existing&&existing.routeId===routeId)existing.expiresAt=Date.now()+terminalRouteTtlMs;
   }
-  await publisher?.publish(routeChannel(routeId),JSON.stringify({type:'agent.realtime.ack',requestId}));
+  if(requireAck)await publisher?.publish(routeChannel(routeId),JSON.stringify({type:'agent.realtime.ack',requestId}));
 }
 
 function handleRoute(channel:string,raw:string){
@@ -116,8 +132,9 @@ async function ensureRouter(){
     pub.on('error',()=>{});sub.on('error',()=>{});
     await Promise.all([pub.connect(),sub.connect()]);
     publisher=pub;subscriber=sub;
-    sub.on('message',(channel,message)=>{if(channel===controlChannel)void handleControl(message);else handleRoute(channel,message);});
-    await sub.subscribe(controlChannel);
+    const ownControlChannel=controlChannel(agentRouterInstanceId());
+    sub.on('message',(channel,message)=>{if(channel===ownControlChannel)void handleControl(message);else handleRoute(channel,message);});
+    await sub.subscribe(ownControlChannel);
     ensureCleanupTimer();
     return true;
   })().catch(error=>{
@@ -134,22 +151,37 @@ export async function registerRealtimeRoute(routeId:string,handler:RouteHandler)
 }
 export async function unregisterRealtimeRoute(routeId:string){
   handlers.delete(routeId);
+  for(const [key,value] of outboundStreams)if(value.routeId===routeId)outboundStreams.delete(key);
+  for(const [key,value] of outboundTerminals)if(value.routeId===routeId)outboundTerminals.delete(key);
   if(subscriber)await subscriber.unsubscribe(routeChannel(routeId)).catch(()=>0);
 }
 
 export async function routeAgentRealtimeEnvelope(serverId:string,routeId:string,envelope:unknown){
   uuid.parse(serverId);uuid.parse(routeId);const parsed=routeEnvelope.parse(envelope);
-  try{sendAgentEnvelope(serverId,parsed);return 'local' as const;}catch(error){
+  try{
+    sendAgentEnvelope(serverId,parsed);
+    rememberOutbound(serverId,routeId,parsed,agentRouterInstanceId());
+    return 'local' as const;
+  }catch(error){
     if(!(error instanceof Error)||!error.message.includes('Agent not connected'))throw error;
   }
-  if(!await ensureRouter()||!publisher||!subscriber)throw Object.assign(new Error('Agent not connected'),{statusCode:503});
-  await subscriber.subscribe(routeChannel(routeId));
+  if(!await ensureRouter()||!publisher)throw Object.assign(new Error('Agent not connected'),{statusCode:503});
+  const cached=cachedOwner(serverId,parsed);
+  const owner=cached?.ownerInstanceId??await resolveAgentOwnerInstance(serverId);
+  if(!owner||owner===agentRouterInstanceId())throw Object.assign(new Error('Agent not connected'),{statusCode:503});
   const requestId=randomUUID();
+  const requireAck=parsed.type==='stream.subscribe'||parsed.type==='terminal.open';
+  const message={type:'agent.realtime.control',requestId,routeId,serverId,requireAck,envelope:parsed};
+  if(!requireAck){
+    const count=await publisher.publish(controlChannel(owner),JSON.stringify(message));
+    if(count<1)throw Object.assign(new Error('Agent route unavailable'),{statusCode:503});
+    rememberOutbound(serverId,routeId,parsed,owner);
+    return 'remote' as const;
+  }
   return new Promise<'remote'>((resolve,reject)=>{
     const timer=setTimeout(()=>{pendingAcks.delete(requestId);reject(Object.assign(new Error('Agent route unavailable'),{statusCode:503}));},2500);
-    pendingAcks.set(requestId,{routeId,resolve:()=>resolve('remote'),reject,timer});
-    const message={type:'agent.realtime.control',requestId,routeId,serverId,envelope:parsed};
-    void publisher!.publish(controlChannel,JSON.stringify(message)).then(count=>{
+    pendingAcks.set(requestId,{routeId,resolve:()=>{rememberOutbound(serverId,routeId,parsed,owner);resolve('remote');},reject,timer});
+    void publisher!.publish(controlChannel(owner),JSON.stringify(message)).then(count=>{
       if(count>0)return;
       clearTimeout(timer);pendingAcks.delete(requestId);reject(Object.assign(new Error('Agent route unavailable'),{statusCode:503}));
     }).catch(error=>{clearTimeout(timer);pendingAcks.delete(requestId);reject(error);});
@@ -185,7 +217,7 @@ export function forwardRemoteTerminal(serverId:string,message:unknown){
 
 export async function closeRealtimeRouter(){
   for(const pending of pendingAcks.values()){clearTimeout(pending.timer);pending.reject(new Error('Realtime router shutting down'));}
-  pendingAcks.clear();handlers.clear();remoteStreams.clear();remoteTerminals.clear();
+  pendingAcks.clear();handlers.clear();remoteStreams.clear();remoteTerminals.clear();outboundStreams.clear();outboundTerminals.clear();
   if(cleanupTimer){clearInterval(cleanupTimer);cleanupTimer=null;}
   const sub=subscriber;const pub=publisher;subscriber=null;publisher=null;ready=null;
   if(sub){try{await sub.quit();}catch{sub.disconnect();}}
