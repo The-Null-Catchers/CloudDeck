@@ -62,14 +62,17 @@ final class PushNavigationIntent {
   final String type;
   final String? href;
 
-  factory PushNavigationIntent.fromMessage(RemoteMessage message) {
-    final rawType = message.data['type'];
-    final rawHref = message.data['href'];
+  factory PushNavigationIntent.fromData(Map<String, dynamic> data) {
+    final rawType = data['type'];
+    final rawHref = data['href'];
     return PushNavigationIntent(
       type: rawType is String && rawType.isNotEmpty ? rawType : 'info',
       href: rawHref is String && rawHref.isNotEmpty ? rawHref : null,
     );
   }
+
+  factory PushNavigationIntent.fromMessage(RemoteMessage message) =>
+      PushNavigationIntent.fromData(message.data);
 }
 
 final class PushNotificationService {
