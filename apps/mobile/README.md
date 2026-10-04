@@ -32,14 +32,15 @@ flutter run --dart-define=CLOUDDECK_API_URL=https://api.example.com
 
 The default API URL is `http://10.0.2.2:4000` for Android emulator local development.
 
-Android runner files are reproducibly generated with:
+Native runner files are reproducibly generated with:
 
 ```bash
 ./tool/bootstrap_android.sh
+./tool/bootstrap_ios.sh
 ```
 
-The Android application ID is `org.clouddeck.mobile`. The generated release manifest disallows cleartext HTTP. Debug builds override cleartext only for local emulator/development use.
+Both platforms use the application identifier `org.clouddeck.mobile`. The generated Android release manifest disallows cleartext HTTP. Debug Android builds override cleartext only for local emulator/development use.
 
-CI builds a release-mode smoke APK against a non-routable HTTPS placeholder API and keeps it as a short-lived GitHub Actions artifact. That artifact is **not store-signed** and must not be distributed as a production release. Store signing credentials belong in CI secret storage and are added in a later release-signing slice.
+CI builds a release-mode smoke APK on Linux and an unsigned release-mode iOS app on macOS against a non-routable HTTPS placeholder API. The artifacts are short-lived validation outputs and are **not store-signed**. App Store/TestFlight signing credentials, provisioning profiles, and distribution certificates must stay in CI secret storage and are intentionally not committed to the repository.
 
 Never embed production API secrets or refresh tokens in build-time configuration.
