@@ -150,9 +150,31 @@ func uploadS3Backup(ctx context.Context,config s3BackupConfig,path,localStorageK
  if err:=validateS3BackupConfig(&config);err!=nil{return "",err}
  objectKey,err:=s3BackupObjectKey(config,localStorageKey)
  if err!=nil{return "",err}
- info,err:=os.Stat(path)
+ uploadPath:=path
+ payloadHash:=sha
+ contentType:="application/gzip"
+ extra:=map[string]string{"x-amz-meta-clouddeck-sha256":sha}
+ key,encrypted,keyErr:=backupEncryptionKey()
+ if keyErr!=nil{return "",keyErr}
+ var encryptedPath string
+ if encrypted{
+  staging,err:=os.CreateTemp(filepath.Dir(path),".clouddeck-s3-encrypted-*")
+  if err!=nil{return "",errors.New("unable to create encrypted S3 staging file")}
+  encryptedPath=staging.Name()
+  if err:=staging.Close();err!=nil{_ = os.Remove(encryptedPath);return "",errors.New("unable to prepare encrypted S3 staging file")}
+  _=os.Remove(encryptedPath)
+  if err:=encryptBackupPayload(path,encryptedPath,key);err!=nil{return "",err}
+  defer os.Remove(encryptedPath)
+  payloadHash,err=backupFileSHA256(encryptedPath)
+  if err!=nil{return "",errors.New("unable to checksum encrypted backup payload")}
+  uploadPath=encryptedPath
+  contentType="application/octet-stream"
+  extra["x-amz-meta-clouddeck-encryption"]="aes-256-gcm-chunked-v1"
+  extra["x-amz-meta-clouddeck-cipher-sha256"]=payloadHash
+ }
+ info,err:=os.Stat(uploadPath)
  if err!=nil||!info.Mode().IsRegular(){return "",errors.New("backup staging archive is unavailable")}
- file,err:=os.Open(path)
+ file,err:=os.Open(uploadPath)
  if err!=nil{return "",errors.New("unable to open backup staging archive")}
  defer file.Close()
  target,err:=s3ObjectURL(config,objectKey)
@@ -160,9 +182,8 @@ func uploadS3Backup(ctx context.Context,config s3BackupConfig,path,localStorageK
  request,err:=http.NewRequestWithContext(ctx,http.MethodPut,target.String(),file)
  if err!=nil{return "",errors.New("unable to prepare S3 upload")}
  request.ContentLength=info.Size()
- request.Header.Set("Content-Type","application/gzip")
- extra:=map[string]string{"x-amz-meta-clouddeck-sha256":sha}
- signS3Request(request,config,sha,time.Now(),extra)
+ request.Header.Set("Content-Type",contentType)
+ signS3Request(request,config,payloadHash,time.Now(),extra)
  response,err:=s3HTTPClient(30*time.Minute).Do(request)
  if err!=nil{return "",errors.New("S3 upload failed")}
  _,_=io.Copy(io.Discard,io.LimitReader(response.Body,64*1024))
@@ -178,6 +199,10 @@ func uploadS3Backup(ctx context.Context,config s3BackupConfig,path,localStorageK
  if verified.StatusCode<200||verified.StatusCode>=300{return "",fmt.Errorf("S3 verification returned HTTP %d",verified.StatusCode)}
  if verified.ContentLength!=info.Size(){return "",errors.New("S3 verification size mismatch")}
  if !strings.EqualFold(strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-sha256")),sha){return "",errors.New("S3 verification checksum metadata mismatch")}
+ if encrypted{
+  if strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-encryption"))!="aes-256-gcm-chunked-v1"{return "",errors.New("S3 verification encryption metadata mismatch")}
+  if !strings.EqualFold(strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-cipher-sha256")),payloadHash){return "",errors.New("S3 verification cipher checksum metadata mismatch")}
+ }
  return objectKey,nil
 }
 
@@ -202,18 +227,44 @@ func downloadS3Backup(ctx context.Context,config s3BackupConfig,objectKey,destin
  if response.StatusCode<200||response.StatusCode>=300{return fmt.Errorf("S3 restore download returned HTTP %d",response.StatusCode)}
  remoteSHA:=strings.TrimSpace(response.Header.Get("x-amz-meta-clouddeck-sha256"))
  if !strings.EqualFold(remoteSHA,expectedSHA){return errors.New("S3 restore object checksum metadata mismatch")}
- file,err:=os.OpenFile(destination,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
- if err!=nil{return errors.New("unable to create S3 restore staging file")}
- ok:=false
- defer func(){_ = file.Close();if !ok{_ = os.Remove(destination)}}()
- hash:=sha256.New()
- limited:=&countingWriter{writer:io.MultiWriter(file,hash),limit:backupMaxBytes()}
- if _,err:=io.Copy(limited,response.Body);err!=nil{return errors.New("S3 restore download could not be stored")}
- if err:=file.Sync();err!=nil{return errors.New("S3 restore staging file could not be synced")}
- if err:=file.Close();err!=nil{return errors.New("S3 restore staging file could not be closed")}
- actual:=hex.EncodeToString(hash.Sum(nil))
- if !strings.EqualFold(actual,expectedSHA){return errors.New("S3 restore object checksum mismatch")}
- ok=true
+ encryption:=strings.TrimSpace(response.Header.Get("x-amz-meta-clouddeck-encryption"))
+ if encryption!=""&&encryption!="aes-256-gcm-chunked-v1"{return errors.New("unsupported S3 backup encryption format")}
+ if encryption==""{
+  file,err:=os.OpenFile(destination,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
+  if err!=nil{return errors.New("unable to create S3 restore staging file")}
+  ok:=false
+  defer func(){_ = file.Close();if !ok{_ = os.Remove(destination)}}()
+  hash:=sha256.New()
+  limited:=&countingWriter{writer:io.MultiWriter(file,hash),limit:backupMaxBytes()}
+  if _,err:=io.Copy(limited,response.Body);err!=nil{return errors.New("S3 restore download could not be stored")}
+  if err:=file.Sync();err!=nil{return errors.New("S3 restore staging file could not be synced")}
+  if err:=file.Close();err!=nil{return errors.New("S3 restore staging file could not be closed")}
+  actual:=hex.EncodeToString(hash.Sum(nil))
+  if !strings.EqualFold(actual,expectedSHA){return errors.New("S3 restore object checksum mismatch")}
+  ok=true
+  return nil
+ }
+ cipherSHA:=strings.TrimSpace(response.Header.Get("x-amz-meta-clouddeck-cipher-sha256"))
+ if !validBackupSHA(cipherSHA){return errors.New("encrypted S3 backup is missing a valid cipher checksum")}
+ key,configured,keyErr:=backupEncryptionKey()
+ if keyErr!=nil{return keyErr}
+ if !configured{return errors.New("encrypted S3 backup requires CLOUDDECK_BACKUP_ENCRYPTION_KEY")}
+ encryptedFile,err:=os.CreateTemp(filepath.Dir(destination),".clouddeck-s3-ciphertext-*")
+ if err!=nil{return errors.New("unable to create encrypted S3 restore staging file")}
+ encryptedPath:=encryptedFile.Name()
+ keepCiphertext:=false
+ defer func(){_ = encryptedFile.Close();if !keepCiphertext{_ = os.Remove(encryptedPath)}}()
+ cipherHash:=sha256.New()
+ limited:=&countingWriter{writer:io.MultiWriter(encryptedFile,cipherHash),limit:encryptedBackupMaxBytes()}
+ if _,err:=io.Copy(limited,response.Body);err!=nil{return errors.New("encrypted S3 restore download could not be stored")}
+ if err:=encryptedFile.Sync();err!=nil{return errors.New("encrypted S3 restore staging file could not be synced")}
+ if err:=encryptedFile.Close();err!=nil{return errors.New("encrypted S3 restore staging file could not be closed")}
+ actualCipherSHA:=hex.EncodeToString(cipherHash.Sum(nil))
+ if !strings.EqualFold(actualCipherSHA,cipherSHA){return errors.New("encrypted S3 restore cipher checksum mismatch")}
+ if err:=decryptBackupPayload(encryptedPath,destination,key);err!=nil{return err}
+ plaintextSHA,err:=backupFileSHA256(destination)
+ if err!=nil{_ = os.Remove(destination);return errors.New("unable to verify decrypted backup checksum")}
+ if !strings.EqualFold(plaintextSHA,expectedSHA){_ = os.Remove(destination);return errors.New("decrypted backup checksum mismatch")}
  return nil
 }
 func deleteS3Backup(ctx context.Context,config s3BackupConfig,objectKey string)error{
