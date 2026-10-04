@@ -54,8 +54,8 @@ export async function streamRoutes(app:FastifyInstance){
     const closeStream=async()=>{
       if(closed)return;closed=true;
       unregisterAgentStream(ticket.serverId,subscriptionId);
-      await unregisterRealtimeRoute(subscriptionId).catch(()=>{});
       await routeAgentRealtimeEnvelope(ticket.serverId,subscriptionId,{type:'stream.unsubscribe',subscriptionId}).catch(()=>{});
+      await unregisterRealtimeRoute(subscriptionId).catch(()=>{});
     };
     registerAgentStream(ticket.serverId,subscriptionId,deliver);
     socket.on('close',()=>{void closeStream();});

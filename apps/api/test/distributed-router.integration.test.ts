@@ -26,15 +26,7 @@ function peer(role:PeerRole,serverId:string,instanceId:string){
 function waitForLine(child:ChildProcessWithoutNullStreams,prefix:string,timeoutMs=8_000):Promise<string>{
   return new Promise((resolve,reject)=>{
     let output='';
-    const timer=setTimeout(()=>finish(new Error(`Timed out waiting for ${prefix}; stdout=${output}; stderr=${stderr}`)),timeoutMs);
     let stderr='';
-    const onData=(chunk:Buffer)=>{
-      output+=chunk.toString();
-      const line=output.split(/\r?\n/).find(value=>value.startsWith(prefix));
-      if(line)finish(undefined,line);
-    };
-    const onError=(chunk:Buffer)=>{stderr+=chunk.toString();};
-    const onExit=(code:number|null)=>finish(new Error(`Peer exited before ${prefix} (code ${code}); stdout=${output}; stderr=${stderr}`));
     const finish=(error?:Error,line?:string)=>{
       clearTimeout(timer);
       child.stdout.off('data',onData);
@@ -42,10 +34,24 @@ function waitForLine(child:ChildProcessWithoutNullStreams,prefix:string,timeoutM
       child.off('exit',onExit);
       if(error)reject(error);else resolve(line!);
     };
+    const timer=setTimeout(()=>finish(new Error(`Timed out waiting for ${prefix}; stdout=${output}; stderr=${stderr}`)),timeoutMs);
+    const onData=(chunk:Buffer)=>{
+      output+=chunk.toString();
+      const line=output.split(/\r?\n/).find(value=>value.startsWith(prefix));
+      if(line)finish(undefined,line);
+    };
+    const onError=(chunk:Buffer)=>{stderr+=chunk.toString();};
+    const onExit=(code:number|null)=>finish(new Error(`Peer exited before ${prefix} (code ${code}); stdout=${output}; stderr=${stderr}`));
     child.stdout.on('data',onData);
     child.stderr.on('data',onError);
     child.once('exit',onExit);
   });
+}
+
+async function waitForExit(child:ChildProcessWithoutNullStreams){
+  if(child.exitCode!==null)return child.exitCode;
+  const [code]=await once(child,'exit');
+  return code as number|null;
 }
 
 async function stop(child:ChildProcessWithoutNullStreams){
@@ -63,16 +69,14 @@ test('routes commands to the owning API process and rejects duplicate ownership'
 
     const duplicate=peer('duplicate',serverId,'integration-duplicate');
     assert.equal(await waitForLine(duplicate,'ATTACHED:'),'ATTACHED:false');
-    await once(duplicate,'exit');
-    assert.equal(duplicate.exitCode,0);
+    assert.equal(await waitForExit(duplicate),0);
 
     const requester=peer('requester',serverId,'integration-requester');
     const line=await waitForLine(requester,'{');
     const result=JSON.parse(line) as {handledBy:string;action:string};
     assert.equal(result.handledBy,'integration-owner');
     assert.equal(result.action,'docker.listContainers');
-    await once(requester,'exit');
-    assert.equal(requester.exitCode,0);
+    assert.equal(await waitForExit(requester),0);
   }finally{
     await stop(owner);
   }
@@ -92,8 +96,7 @@ test('routes live logs and bidirectional terminal traffic across API processes',
       'terminal:echo:whoami\n',
       'terminal:resize:120x40'
     ]);
-    await once(requester,'exit');
-    assert.equal(requester.exitCode,0);
+    assert.equal(await waitForExit(requester),0);
   }finally{
     await stop(owner);
   }
