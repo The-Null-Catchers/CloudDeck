@@ -38,14 +38,19 @@ const terminalData=z.discriminatedUnion('type',[
 type RouteMessage=z.infer<typeof streamData>|z.infer<typeof terminalData>;
 type RouteHandler=(message:RouteMessage)=>void;
 type PendingAck={routeId:string;resolve:()=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>};
+type RemoteRoute={routeId:string;expiresAt:number};
 
+const streamRouteTtlMs=2*60*60_000;
+const terminalRouteTtlMs=35*60_000;
+const routeSweepMs=60_000;
 let publisher:Redis|null=null;
 let subscriber:Redis|null=null;
 let ready:Promise<boolean>|null=null;
+let cleanupTimer:ReturnType<typeof setInterval>|null=null;
 const handlers=new Map<string,RouteHandler>();
 const pendingAcks=new Map<string,PendingAck>();
-const remoteStreams=new Map<string,string>();
-const remoteTerminals=new Map<string,string>();
+const remoteStreams=new Map<string,RemoteRoute>();
+const remoteTerminals=new Map<string,RemoteRoute>();
 
 function redisUrl(){
   if(process.env.NODE_ENV==='test'&&process.env.CLOUDDECK_TEST_DISTRIBUTED_ROUTING!=='1')return null;
@@ -59,16 +64,31 @@ function redisOptions(){return {maxRetriesPerRequest:1,enableOfflineQueue:false,
 function routeChannel(routeId:string){return routePrefix+routeId;}
 function streamKey(serverId:string,subscriptionId:string){return `${serverId}:${subscriptionId}`;}
 function terminalKey(serverId:string,sessionId:string){return `${serverId}:${sessionId}`;}
+function route(routeId:string,ttlMs:number):RemoteRoute{return {routeId,expiresAt:Date.now()+ttlMs};}
+function cleanupStaleRoutes(now=Date.now()){
+  for(const [key,value] of remoteStreams)if(value.expiresAt<=now)remoteStreams.delete(key);
+  for(const [key,value] of remoteTerminals)if(value.expiresAt<=now)remoteTerminals.delete(key);
+}
+function ensureCleanupTimer(){
+  if(cleanupTimer)return;
+  cleanupTimer=setInterval(cleanupStaleRoutes,routeSweepMs);
+  cleanupTimer.unref();
+}
 
 async function handleControl(raw:string){
+  cleanupStaleRoutes();
   let value:unknown;try{value=JSON.parse(raw);}catch{return;}
   const parsed=controlMessage.safeParse(value);if(!parsed.success)return;
   const {requestId,routeId,serverId,envelope}=parsed.data;
   try{sendAgentEnvelope(serverId,envelope);}catch{return;}
-  if(envelope.type==='stream.subscribe')remoteStreams.set(streamKey(serverId,envelope.subscriptionId),routeId);
+  if(envelope.type==='stream.subscribe')remoteStreams.set(streamKey(serverId,envelope.subscriptionId),route(routeId,streamRouteTtlMs));
   else if(envelope.type==='stream.unsubscribe')remoteStreams.delete(streamKey(serverId,envelope.subscriptionId));
-  else if(envelope.type==='terminal.open')remoteTerminals.set(terminalKey(serverId,envelope.sessionId),routeId);
+  else if(envelope.type==='terminal.open')remoteTerminals.set(terminalKey(serverId,envelope.sessionId),route(routeId,terminalRouteTtlMs));
   else if(envelope.type==='terminal.close')remoteTerminals.delete(terminalKey(serverId,envelope.sessionId));
+  else if(envelope.type==='terminal.input'||envelope.type==='terminal.resize'){
+    const key=terminalKey(serverId,envelope.sessionId);const existing=remoteTerminals.get(key);
+    if(existing&&existing.routeId===routeId)existing.expiresAt=Date.now()+terminalRouteTtlMs;
+  }
   await publisher?.publish(routeChannel(routeId),JSON.stringify({type:'agent.realtime.ack',requestId}));
 }
 
@@ -98,6 +118,7 @@ async function ensureRouter(){
     publisher=pub;subscriber=sub;
     sub.on('message',(channel,message)=>{if(channel===controlChannel)void handleControl(message);else handleRoute(channel,message);});
     await sub.subscribe(controlChannel);
+    ensureCleanupTimer();
     return true;
   })().catch(error=>{
     ready=null;publisher?.disconnect();subscriber?.disconnect();publisher=null;subscriber=null;throw error;
@@ -136,33 +157,36 @@ export async function routeAgentRealtimeEnvelope(serverId:string,routeId:string,
 }
 
 export function forwardRemoteStream(serverId:string,message:unknown){
+  cleanupStaleRoutes();
   const parsed=z.object({type:z.literal('stream.data'),subscriptionId:uuid,line:z.string().max(4000).optional(),error:z.string().max(200).optional(),done:z.boolean().optional()}).strict().safeParse(message);
   if(!parsed.success)return false;
-  const key=streamKey(serverId,parsed.data.subscriptionId);const routeId=remoteStreams.get(key);if(!routeId)return false;
-  if(parsed.data.done||parsed.data.error)remoteStreams.delete(key);
+  const key=streamKey(serverId,parsed.data.subscriptionId);const remote=remoteStreams.get(key);if(!remote)return false;
+  if(parsed.data.done||parsed.data.error)remoteStreams.delete(key);else remote.expiresAt=Date.now()+streamRouteTtlMs;
   const output={type:'agent.realtime.stream' as const,serverId,subscriptionId:parsed.data.subscriptionId,line:parsed.data.line,error:parsed.data.error,done:parsed.data.done};
-  void ensureRouter().then(ok=>ok?publisher?.publish(routeChannel(routeId),JSON.stringify(output)):undefined).catch(()=>{});
+  void ensureRouter().then(ok=>ok?publisher?.publish(routeChannel(remote.routeId),JSON.stringify(output)):undefined).catch(()=>{});
   return true;
 }
 
 export function forwardRemoteTerminal(serverId:string,message:unknown){
+  cleanupStaleRoutes();
   const parsed=z.discriminatedUnion('type',[
     z.object({type:z.literal('terminal.data'),sessionId:uuid,data:z.string().max(8192)}).strict(),
     z.object({type:z.literal('terminal.exit'),sessionId:uuid,exitCode:z.number().int().min(-1).max(255).optional(),error:z.string().max(200).optional()}).strict()
   ]).safeParse(message);
   if(!parsed.success)return false;
-  const key=terminalKey(serverId,parsed.data.sessionId);const routeId=remoteTerminals.get(key);if(!routeId)return false;
-  if(parsed.data.type==='terminal.exit')remoteTerminals.delete(key);
+  const key=terminalKey(serverId,parsed.data.sessionId);const remote=remoteTerminals.get(key);if(!remote)return false;
+  if(parsed.data.type==='terminal.exit')remoteTerminals.delete(key);else remote.expiresAt=Date.now()+terminalRouteTtlMs;
   const output=parsed.data.type==='terminal.data'
     ?{type:'agent.realtime.terminal.data',serverId,sessionId:parsed.data.sessionId,data:parsed.data.data}
     :{type:'agent.realtime.terminal.exit',serverId,sessionId:parsed.data.sessionId,exitCode:parsed.data.exitCode,error:parsed.data.error};
-  void ensureRouter().then(ok=>ok?publisher?.publish(routeChannel(routeId),JSON.stringify(output)):undefined).catch(()=>{});
+  void ensureRouter().then(ok=>ok?publisher?.publish(routeChannel(remote.routeId),JSON.stringify(output)):undefined).catch(()=>{});
   return true;
 }
 
 export async function closeRealtimeRouter(){
   for(const pending of pendingAcks.values()){clearTimeout(pending.timer);pending.reject(new Error('Realtime router shutting down'));}
   pendingAcks.clear();handlers.clear();remoteStreams.clear();remoteTerminals.clear();
+  if(cleanupTimer){clearInterval(cleanupTimer);cleanupTimer=null;}
   const sub=subscriber;const pub=publisher;subscriber=null;publisher=null;ready=null;
   if(sub){try{await sub.quit();}catch{sub.disconnect();}}
   if(pub){try{await pub.quit();}catch{pub.disconnect();}}
