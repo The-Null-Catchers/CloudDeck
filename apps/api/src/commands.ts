@@ -150,6 +150,20 @@ export function isAgentConnected(serverId:string){
   const connection=active.get(serverId);
   return Boolean(connection && connection.socket.readyState===1);
 }
+export function agentRouterInstanceId(){return instanceId;}
+export async function resolveAgentOwnerInstance(serverId:string):Promise<string|null>{
+  if(isAgentConnected(serverId))return instanceId;
+  if(!await ensureRouter())return null;
+  const redis=routerRedis;
+  if(!redis)return null;
+  const owner=await redis.get(ownerKey(serverId));
+  if(!owner)return null;
+  if(owner===instanceId&&!isAgentConnected(serverId)){
+    await releaseOwnerLease(serverId);
+    return null;
+  }
+  return owner;
+}
 export function detachAgent(serverId:string,socket:WebSocket) {
   const connection=active.get(serverId);
   if(!connection || connection.socket!==socket)return;
