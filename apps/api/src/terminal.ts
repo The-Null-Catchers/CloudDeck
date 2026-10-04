@@ -64,8 +64,8 @@ export async function terminalRoutes(app:FastifyInstance){
       pendingReason=reason;
       clearTimeout(timeout);
       terminals.delete(terminalKey);
-      await unregisterRealtimeRoute(sessionId).catch(()=>{});
       await routeAgentRealtimeEnvelope(ticket.serverId,sessionId,{type:'terminal.close',sessionId}).catch(()=>{});
+      await unregisterRealtimeRoute(sessionId).catch(()=>{});
       if(persisted)await pool.query('UPDATE terminal_sessions SET ended_at=now(),close_reason=$2 WHERE id=$1 AND ended_at IS NULL',[sessionId,reason]).catch(()=>undefined);
       await audit(ticket.organizationId,ticket.userId,'terminal.session.closed','server',ticket.serverId,request.ip,{sessionId,reason}).catch(()=>undefined);
       if(socket.readyState===1)socket.close(1000,'Terminal closed');
