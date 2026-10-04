@@ -4,9 +4,9 @@ import {notificationQueueJob} from '../src/notification-queue.ts';
 
 test('notification queue jobs contain only the durable delivery identifier',()=>{
   const job=notificationQueueJob('42');
-  assert.equal(job.name,'email');
+  assert.equal(job.name,'delivery');
   assert.deepEqual(job.data,{deliveryId:'42'});
-  assert.equal(job.options.jobId,'email-42');
+  assert.equal(job.options.jobId,'notification-42');
   assert.equal(job.options.attempts,5);
 });
 
