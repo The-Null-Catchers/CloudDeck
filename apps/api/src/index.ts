@@ -28,6 +28,7 @@ import {pushDeviceRoutes} from './push-devices.js';
 import {demoRoutes} from './demo.js';
 import {searchRoutes} from './search.js';
 import {auditLogRoutes} from './audit-logs.js';
+import {memberRoutes} from './members.js';
 import {startBackupRunner} from './backup-runner.js';
 import {startDomainTlsRunner} from './domain-runner.js';
 import {startHealthCheckRunner} from './health-runner.js';
@@ -81,6 +82,7 @@ export function buildApp() {
   app.register(demoRoutes,{prefix:'/api/v1'});
   app.register(searchRoutes,{prefix:'/api/v1'});
   app.register(auditLogRoutes,{prefix:'/api/v1'});
+  app.register(memberRoutes,{prefix:'/api/v1'});
   return app;
 }
 

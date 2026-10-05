@@ -29,6 +29,20 @@ export async function sendChallenge(kind:'verify_email'|'reset_password',email:s
   });
 }
 
+export async function sendWorkspaceInvitation(email:string,workspaceName:string,role:string,token:string){
+  if(process.env.NODE_ENV==='test')return;
+  const origin=process.env.APP_ORIGIN??'http://localhost:3000';
+  const safeWorkspace=workspaceName.replace(/[\r\n]+/g,' ').trim().slice(0,100)||'CloudDeck workspace';
+  const safeRole=role.replace(/[\r\n]+/g,' ').trim().slice(0,30);
+  const link=`${origin}/invite?token=${encodeURIComponent(token)}`;
+  await mailTransport().sendMail({
+    from:sender(),
+    to:email,
+    subject:`[CloudDeck] Invitation to ${safeWorkspace}`,
+    text:`You were invited to join ${safeWorkspace} as ${safeRole}.\n\nSign in with this email address and accept within 7 days:\n${link}\n\nIf you were not expecting this invitation, ignore this message.`
+  });
+}
+
 export async function sendOperationalNotification(
   email:string,
   title:string,

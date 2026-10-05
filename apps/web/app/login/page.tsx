@@ -1,9 +1,14 @@
 'use client';
-import {useState} from 'react';
+import {useEffect,useState} from 'react';
 import {useRouter} from 'next/navigation';
 import Link from 'next/link';
 import {Activity,ArrowLeft,ArrowRight,ShieldCheck} from 'lucide-react';
 import {completeTwoFactorLogin,login,register} from '@/lib/api';
+
+function safeReturnTo(value:string|null){
+  if(!value||!value.startsWith('/')||value.startsWith('//'))return '/dashboard';
+  try{const parsed=new URL(value,'http://clouddeck.local');return parsed.origin==='http://clouddeck.local'?`${parsed.pathname}${parsed.search}${parsed.hash}`:'/dashboard'}catch{return '/dashboard'}
+}
 
 export default function Login(){
   const router=useRouter();
@@ -14,6 +19,9 @@ export default function Login(){
   const [code,setCode]=useState('');
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
+  const [returnTo,setReturnTo]=useState('/dashboard');
+
+  useEffect(()=>{setReturnTo(safeReturnTo(new URLSearchParams(window.location.search).get('returnTo')))},[]);
 
   function resetMode(next:'login'|'register'){
     setMode(next);setChallenge('');setCode('');setError('');
@@ -24,12 +32,12 @@ export default function Login(){
     try{
       if(challenge){
         await completeTwoFactorLogin(challenge,code);
-        router.push('/dashboard');
+        router.push(returnTo);
         return;
       }
       if(mode==='register'){
         await register(email,password);
-        router.push('/dashboard');
+        router.push(returnTo);
         return;
       }
       const result=await login(email,password);
@@ -38,7 +46,7 @@ export default function Login(){
         setCode('');
         return;
       }
-      router.push('/dashboard');
+      router.push(returnTo);
     }catch(err){
       setError(err instanceof Error?err.message:'Try again');
     }finally{setBusy(false)}
