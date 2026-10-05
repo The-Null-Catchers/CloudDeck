@@ -10,7 +10,7 @@ const querySchema=z.object({
   action:z.string().trim().min(1).max(120).optional(),
   resourceType:z.string().trim().min(1).max(80).optional()
 }).strict();
-const sensitiveKey=/(password|passphrase|token|secret|credential|authorization|cookie|private.?key|value)/i;
+const sensitiveKey=/(password|passphrase|token|secret|credential|authorization|cookie|private.?key|(?:^|[_-])value$)/i;
 
 export function sanitizeAuditMetadata(value:unknown,depth=0):unknown{
   if(depth>4)return '[truncated]';
