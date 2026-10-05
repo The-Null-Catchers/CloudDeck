@@ -10,6 +10,19 @@ const querySchema=z.object({
   action:z.string().trim().min(1).max(120).optional(),
   resourceType:z.string().trim().min(1).max(80).optional()
 }).strict();
+const sensitiveKey=/(password|passphrase|token|secret|credential|authorization|cookie|private.?key|value)/i;
+
+export function sanitizeAuditMetadata(value:unknown,depth=0):unknown{
+  if(depth>4)return '[truncated]';
+  if(Array.isArray(value))return value.slice(0,50).map(item=>sanitizeAuditMetadata(item,depth+1));
+  if(value&&typeof value==='object'){
+    return Object.fromEntries(Object.entries(value as Record<string,unknown>).slice(0,100).map(([key,item])=>[
+      key,sensitiveKey.test(key)?'[redacted]':sanitizeAuditMetadata(item,depth+1)
+    ]));
+  }
+  if(typeof value==='string')return value.length>1000?`${value.slice(0,1000)}…`:value;
+  return value;
+}
 
 export async function auditLogRoutes(app:FastifyInstance){
   app.get('/organizations/:orgId/audit-logs',async request=>{
@@ -37,7 +50,7 @@ export async function auditLogRoutes(app:FastifyInstance){
     );
 
     const hasMore=result.rows.length>query.limit;
-    const rows=hasMore?result.rows.slice(0,query.limit):result.rows;
+    const rows=(hasMore?result.rows.slice(0,query.limit):result.rows).map(row=>({...row,metadata:sanitizeAuditMetadata(row.metadata)}));
     return {
       auditLogs:rows,
       nextBeforeId:hasMore?rows.at(-1)?.id??null:null
