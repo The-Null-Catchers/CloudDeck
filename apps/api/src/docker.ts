@@ -5,6 +5,7 @@ import {authenticate,membership,audit} from './security.js';
 import {containerId,sendAgentCommand} from './commands.js';
 
 const params=z.object({serverId:z.uuid()});
+const orgParams=z.object({orgId:z.uuid()});
 const containerParams=params.extend({containerId});
 const composeServiceParams=params.extend({project:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/),service:z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/)});
 const containerSummary=z.object({
@@ -55,6 +56,41 @@ async function authorizedServer(userId:string,serverId:string,permission:'server
 }
 
 export async function dockerRoutes(app:FastifyInstance) {
+  app.get('/organizations/:orgId/docker/containers',async request=>{
+    const {userId}=await authenticate(request);
+    const {orgId}=orgParams.parse(request.params);
+    await membership(userId,orgId,'server.read');
+    const servers=await pool.query(
+      `SELECT id,name,hostname,status FROM servers WHERE organization_id=$1 ORDER BY name LIMIT 100`,
+      [orgId]
+    );
+    const online=servers.rows.filter(server=>server.status==='online');
+    const results=await Promise.all(online.map(async server=>{
+      try{
+        const raw=await sendAgentCommand(server.id,'docker.listContainers');
+        const containers=z.array(containerSummary).max(200).parse(raw);
+        return {server,error:null,containers};
+      }catch(error){
+        return {server,error:error instanceof Error?error.message:'Agent command failed',containers:[]};
+      }
+    }));
+    return {
+      containers:results.flatMap(result=>result.containers.map(container=>({
+        ...container,
+        serverId:result.server.id,
+        serverName:result.server.name,
+        serverHostname:result.server.hostname
+      }))),
+      servers:servers.rows.map(server=>({
+        id:server.id,
+        name:server.name,
+        hostname:server.hostname,
+        status:server.status,
+        error:results.find(result=>result.server.id===server.id)?.error??null
+      }))
+    };
+  });
+
   app.get('/servers/:serverId/docker/containers',async request=>{
     const {userId}=await authenticate(request);
     const {serverId}=params.parse(request.params);
@@ -70,8 +106,6 @@ export async function dockerRoutes(app:FastifyInstance) {
     const result=await sendAgentCommand(serverId,'docker.listComposeProjects');
     return {projects:z.array(composeProject).max(100).parse(result)};
   });
-
-
 
   app.post('/servers/:serverId/docker/compose/:project/services/:service/action',async request=>{
     const {userId}=await authenticate(request);
