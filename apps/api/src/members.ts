@@ -114,7 +114,7 @@ export async function memberRoutes(app:FastifyInstance){
       if(row.email.toLowerCase()!==row.user_email.toLowerCase())throw Object.assign(new Error('Invitation email does not match your account'),{statusCode:403});
       await client.query(
         `INSERT INTO organization_members(organization_id,user_id,role) VALUES($1,$2,$3)
-         ON CONFLICT(organization_id,user_id) DO UPDATE SET role=EXCLUDED.role`,
+         ON CONFLICT(organization_id,user_id) DO NOTHING`,
         [row.organization_id,userId,row.role]
       );
       await client.query('UPDATE organization_invitations SET accepted_at=now() WHERE id=$1',[row.id]);
