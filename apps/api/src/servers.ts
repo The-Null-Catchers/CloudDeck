@@ -9,7 +9,7 @@ const metricQuery = z.object({range:z.enum(['1h','6h','24h','7d','30d']).default
 export async function serverRoutes(app: FastifyInstance) {
   app.get('/organizations', async request => {
     const {userId} = await authenticate(request);
-    const result = await pool.query('SELECT o.id,o.name,o.personal,m.role FROM organizations o JOIN organization_members m ON m.organization_id=o.id WHERE m.user_id=$1 ORDER BY o.created_at', [userId]);
+    const result = await pool.query('SELECT o.id,o.name,o.personal,o.demo,m.role FROM organizations o JOIN organization_members m ON m.organization_id=o.id WHERE m.user_id=$1 ORDER BY o.demo DESC,o.created_at', [userId]);
     return {organizations:result.rows};
   });
   app.post('/organizations', async (request,reply) => {

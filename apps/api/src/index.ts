@@ -25,6 +25,7 @@ import {secretRoutes} from './secrets.js';
 import {backupRoutes} from './backups.js';
 import {twoFactorRoutes} from './two-factor.js';
 import {pushDeviceRoutes} from './push-devices.js';
+import {demoRoutes} from './demo.js';
 import {startBackupRunner} from './backup-runner.js';
 import {startDomainTlsRunner} from './domain-runner.js';
 import {startHealthCheckRunner} from './health-runner.js';
@@ -75,6 +76,7 @@ export function buildApp() {
   app.register(backupRoutes,{prefix:'/api/v1'});
   app.register(twoFactorRoutes,{prefix:'/api/v1'});
   app.register(pushDeviceRoutes,{prefix:'/api/v1'});
+  app.register(demoRoutes,{prefix:'/api/v1'});
   return app;
 }
 
