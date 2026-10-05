@@ -2,7 +2,7 @@
 
 import {useEffect,useMemo,useState} from 'react';
 import {useRouter} from 'next/navigation';
-import {Activity,ArrowLeft,Box,RefreshCw,Search,Server,ScrollText,TerminalSquare} from 'lucide-react';
+import {Activity,ArrowLeft,Box,RefreshCw,Search,Server,ScrollText,SquareTerminal} from 'lucide-react';
 import {api} from '@/lib/api';
 
 type Org={id:string;name:string;role:string};
@@ -32,7 +32,7 @@ export default function LogsPage(){
       <section className="deploy-hero"><div><span className="eyebrow">OBSERVABILITY / LOGS</span><h1>Centralized log explorer</h1><p>Inspect systemd and Docker logs from every connected server without leaving the workspace view.</p></div><div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void loadLogs()} disabled={busy||!target}><RefreshCw size={15}/> {busy?'Loading…':'Refresh logs'}</button></div></section>
       {error&&<div className="notice" role="status">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
       <section className="deploy-section"><div className="deploy-section-head"><div><h2>Log source</h2><p>Select a server and runtime source. Log reads are audited by CloudDeck.</p></div></div>
-        <div className="alert-filters" style={{marginBottom:16}}><button className={source==='systemd'?'active':''} onClick={()=>{setSource('systemd');setResult(null)}}><TerminalSquare size={14}/> systemd</button><button className={source==='docker'?'active':''} onClick={()=>{setSource('docker');setResult(null)}}><Box size={14}/> Docker</button></div>
+        <div className="alert-filters" style={{marginBottom:16}}><button className={source==='systemd'?'active':''} onClick={()=>{setSource('systemd');setResult(null)}}><SquareTerminal size={14}/> systemd</button><button className={source==='docker'?'active':''} onClick={()=>{setSource('docker');setResult(null)}}><Box size={14}/> Docker</button></div>
         <div className="form-grid">
           <label><span>Server</span><select value={serverId} onChange={e=>{setServerId(e.target.value);setTarget('');setResult(null)}} disabled={loading}>{servers.map(server=><option key={server.id} value={server.id}>{server.name} · {server.hostname??server.status}</option>)}</select></label>
           <label><span>{source==='systemd'?'Service':'Container'}</span><select value={target} onChange={e=>{setTarget(e.target.value);setResult(null)}}>{targets.map(item=>source==='systemd'?<option key={(item as Service).name} value={(item as Service).name}>{(item as Service).name} · {(item as Service).active}</option>:<option key={(item as Container).id} value={(item as Container).id}>{(item as Container).name} · {(item as Container).image}</option>)}</select></label>
@@ -42,7 +42,7 @@ export default function LogsPage(){
       <section className="deploy-section"><div className="deploy-section-head alert-head"><div><h2>Output</h2><p>{result?`${result.lines.length} lines${result.truncated?' · truncated':''}`:'Choose a source and load logs.'}</p></div><label className="search-box"><Search size={15}/><input placeholder="Filter loaded lines…" value={query} onChange={e=>setQuery(e.target.value)}/></label></div>
         <pre style={{minHeight:360,maxHeight:'65vh',overflow:'auto',padding:18,borderRadius:12,background:'#0b1020',color:'#d8e1ff',fontSize:12,lineHeight:1.65,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>{visible.length?visible.join('\n'):busy?'Loading logs…':result?'No lines match the filter.':'No logs loaded yet.'}</pre>
       </section>
-      <section className="deploy-stats"><div><Server size={18}/><span>Servers</span><strong>{servers.length}</strong></div><div><TerminalSquare size={18}/><span>Services</span><strong>{services.length}</strong></div><div><Box size={18}/><span>Containers</span><strong>{containers.length}</strong></div><div><ScrollText size={18}/><span>Visible lines</span><strong>{visible.length}</strong></div></section>
+      <section className="deploy-stats"><div><Server size={18}/><span>Servers</span><strong>{servers.length}</strong></div><div><SquareTerminal size={18}/><span>Services</span><strong>{services.length}</strong></div><div><Box size={18}/><span>Containers</span><strong>{containers.length}</strong></div><div><ScrollText size={18}/><span>Visible lines</span><strong>{visible.length}</strong></div></section>
     </main>
   </div>
 }
