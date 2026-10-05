@@ -10,6 +10,11 @@ export function normalizeSearchQuery(value:string){
   return value.trim().replace(/\s+/g,' ').slice(0,120);
 }
 
+export function searchPattern(value:string){
+  const q=normalizeSearchQuery(value);
+  return `%${q.replaceAll('\\','\\\\').replaceAll('%','\\%').replaceAll('_','\\_')}%`;
+}
+
 export async function searchRoutes(app:FastifyInstance){
   app.get('/organizations/:orgId/search',async request=>{
     const {userId}=await authenticate(request);
@@ -17,7 +22,7 @@ export async function searchRoutes(app:FastifyInstance){
     const parsed=querySchema.parse(request.query);
     await membership(userId,orgId,'server.read');
     const q=normalizeSearchQuery(parsed.q);
-    const pattern=`%${q.replaceAll('%','\\%').replaceAll('_','\\_')}%`;
+    const pattern=searchPattern(q);
     const result=await pool.query(
       `WITH matches AS (
          SELECT 'server'::text AS kind,s.id::text AS id,s.name AS title,
