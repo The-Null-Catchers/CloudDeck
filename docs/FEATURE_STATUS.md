@@ -8,7 +8,7 @@ This document tracks the production-facing feature state of CloudDeck. A capabil
 - Email/password authentication with rotating refresh sessions.
 - Optional TOTP two-factor authentication and recovery codes.
 - Personal/team workspaces with RBAC.
-- Workspace member listing, invitations, invitation revocation, invitation acceptance, role changes, and member removal.
+- Workspace member listing, invitations, invitation revocation, invitation acceptance, role changes, member removal, and explicit owner-only ownership transfer.
 - Global workspace search / command palette.
 - Workspace audit-log explorer with filtering and redacted secret-like metadata.
 
@@ -76,11 +76,10 @@ This document tracks the production-facing feature state of CloudDeck. A capabil
 The core platform is functional. Remaining work is mostly release hardening and depth rather than placeholder feature construction:
 
 - End-to-end browser tests for critical operator flows.
-- Broader API integration coverage for cross-workspace isolation and failure modes.
+- Broader API integration coverage for concurrency and failure modes; cross-workspace isolation coverage now protects the highest-value organization-scoped surfaces.
 - Production observability for the CloudDeck control plane itself (structured metrics/traces, queue dashboards, SLOs).
 - Encrypted backup payloads at rest before upload/storage, in addition to encrypted credentials and transport protections.
 - Deployment rollout policies beyond the current single-target activation model (for example canary/blue-green orchestration where appropriate).
-- Explicit organization owner-transfer flow.
 - Mobile release signing/store automation and broader feature parity with the web console.
 - Additional multi-instance/load testing for agent routing, terminal routing, and concurrent deployments.
 - Disaster-recovery runbooks and automated restore drills for the CloudDeck control plane database/object storage.
