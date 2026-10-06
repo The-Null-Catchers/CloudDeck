@@ -11,6 +11,7 @@ const invitationParams=z.object({orgId:id,invitationId:id});
 const roleSchema=z.enum(['admin','operator','viewer']);
 const inviteSchema=z.object({email:z.email().max(320).transform(value=>value.toLowerCase()),role:roleSchema}).strict();
 const roleBody=z.object({role:roleSchema}).strict();
+const transferBody=z.object({memberId:id,confirm:z.literal(true)}).strict();
 const acceptBody=z.object({token:z.string().min(20).max(256)}).strict();
 
 export async function memberRoutes(app:FastifyInstance){
@@ -122,6 +123,44 @@ export async function memberRoutes(app:FastifyInstance){
     });
     await audit(invitation.organization_id,userId,'member.invite.accept','organization_invitation',invitation.id,request.ip,{role:invitation.role});
     return {ok:true,organizationId:invitation.organization_id};
+  });
+
+  app.post('/organizations/:orgId/owner-transfer',async request=>{
+    const {userId}=await authenticate(request);
+    const {orgId}=orgParams.parse(request.params);
+    const {memberId}=transferBody.parse(request.body);
+    if(memberId===userId)throw Object.assign(new Error('You already own this workspace'),{statusCode:409});
+
+    const transfer=await transaction(async client=>{
+      const rows=await client.query(
+        `SELECT m.user_id,m.role,u.email
+         FROM organization_members m
+         JOIN users u ON u.id=m.user_id
+         WHERE m.organization_id=$1 AND m.user_id IN ($2,$3)
+         FOR UPDATE`,
+        [orgId,userId,memberId]
+      );
+      const current=rows.rows.find(row=>row.user_id===userId);
+      const target=rows.rows.find(row=>row.user_id===memberId);
+      if(!current)throw Object.assign(new Error('Workspace membership not found'),{statusCode:404});
+      if(current.role!=='owner')throw Object.assign(new Error('Only the current workspace owner can transfer ownership'),{statusCode:403});
+      if(!target)throw Object.assign(new Error('Target member not found'),{statusCode:404});
+      if(target.role==='owner')throw Object.assign(new Error('Target member already owns this workspace'),{statusCode:409});
+
+      await client.query('UPDATE organization_members SET role=$1 WHERE organization_id=$2 AND user_id=$3',['admin',orgId,userId]);
+      await client.query('UPDATE organization_members SET role=$1 WHERE organization_id=$2 AND user_id=$3',['owner',orgId,memberId]);
+      return {previousOwnerEmail:current.email as string,newOwnerEmail:target.email as string,previousTargetRole:target.role as string};
+    });
+
+    await audit(orgId,userId,'organization.owner.transfer','user',memberId,request.ip,{
+      previousOwner:userId,
+      previousOwnerEmail:transfer.previousOwnerEmail,
+      newOwner:memberId,
+      newOwnerEmail:transfer.newOwnerEmail,
+      previousTargetRole:transfer.previousTargetRole,
+      previousOwnerNewRole:'admin'
+    });
+    return {ok:true,ownerId:memberId,currentUserRole:'admin'};
   });
 
   app.patch('/organizations/:orgId/members/:memberId',async request=>{
