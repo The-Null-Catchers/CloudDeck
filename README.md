@@ -1,42 +1,69 @@
 # CloudDeck
 
-CloudDeck is a multi-server operations and observability platform that combines monitoring, Docker operations, Linux service control, logs, deployments, uptime, backups, alerts and secure remote access in one workspace. The repository is being built phase-by-phase with production safety constraints rather than placeholder buttons.
+CloudDeck is a production-oriented multi-server operations and observability platform for developers, DevOps engineers, and small teams. It combines server monitoring, Docker operations, Linux service control, deployments, logs, uptime monitoring, backups, alerts, secure remote access, and workspace collaboration in one control plane.
 
 ![Dashboard screenshot placeholder](docs/dashboard-placeholder.svg)
 
-## Implemented
+## What is implemented
 
-- Next.js responsive dashboard with demo servers, authentication flows, workspace inventory, server onboarding, server detail metrics, and Docker controls.
-- Fastify API with PostgreSQL migrations, Argon2id passwords, short-lived JWTs, rotating/revocable refresh sessions, optional TOTP two-factor authentication with one-time recovery codes, personal/team workspaces, RBAC, audit logs, verification and reset flows.
-- Go Linux agent with outbound authenticated WebSocket, one-time pairing, heartbeat telemetry, CPU/RAM/disk/load/network metrics, reconnect and protected credential storage.
-- Metric aggregation into one-minute PostgreSQL buckets plus durable hourly rollups for 7/30-day history, configurable raw/hourly retention, and bounded long-range API responses.
-- Docker container inventory and audited restart through typed agent commands.
-- systemd service inventory plus audited start/stop/restart actions. Unit names are strictly validated and no shell command endpoint exists.
-- Bounded systemd journal snapshots plus realtime Docker/systemd log subscriptions using one-time WebSocket tickets, cancellation, and capped in-memory UI buffers.
-- Docker Compose local stack and GitHub Actions checks for Node and Go.
-- Deployment lifecycle state machine with guarded transitions, event history, lifecycle timestamps, RBAC-protected read APIs, and rollback-state support.
-- Domain inventory, distributed TLS certificate monitoring with expiry alerts and SSRF-safe public probing, plus optional least-privilege Caddy/Nginx proxy automation through a separate root helper.
-- Encrypted workspace secret storage using AES-256-GCM, metadata/value separation, no plaintext read API, audited rotation/deletion, and admin/owner management.
-- Verified backups for allowlisted directories, local Docker volumes, PostgreSQL, and MySQL, with local or S3-compatible targets, typed Agent execution, SHA-256 manifests, archive re-read verification, signed S3 post-upload verification, retention cleanup, recurring schedules, encrypted credentials, and confirmed audited PostgreSQL/MySQL/directory/Docker-volume restore workflows.
-- Flutter mobile foundation with native rotating refresh-token sessions, device secure storage, dashboard/server monitoring, historical metrics, alerts, deployment status, notifications, Docker container inventory, bounded logs, and confirmed container restart for authorized operators.
+### Control plane
+- Next.js web dashboard with centralized fleet, container, metrics, logs, deployment, backup, health, alert, domain, secrets, audit, member, and security surfaces.
+- Fastify API with PostgreSQL, Redis, BullMQ, WebSockets, Argon2id passwords, short-lived JWTs, rotating/revocable refresh sessions, optional TOTP two-factor authentication, RBAC, audit logs, verification/reset flows, and workspace-scoped authorization.
+- Personal/team workspaces with member invitations, invitation revocation/acceptance, role management, owner safeguards, and global workspace search.
+
+### Server agent and realtime
+- Go Linux agent with outbound authenticated WebSocket, one-time pairing, heartbeat telemetry, reconnect, and protected credential storage.
+- CPU/RAM/disk/load/network collection with one-minute PostgreSQL aggregation and durable hourly rollups.
+- Redis-backed cross-instance routing for agent commands, realtime logs, and browser terminal sessions.
+- Browser terminal with explicit permission, one-time tickets, PTY lifecycle, resize/input channels, audit records, and a bounded session lifetime.
+
+### Fleet and observability
+- Centralized `/servers` fleet inventory with online/offline/pending status, current pressure, last-seen state, server creation, and one-time pairing-token display.
+- Workspace-wide `/containers` Docker inventory with server attribution, search/filtering, compose context, and authorized lifecycle actions.
+- Workspace-wide `/metrics` explorer with 1h/6h/24h/7d/30d ranges, fleet trends, per-server pressure, CPU/memory/disk/load/network aggregation, and 15-second refresh.
+- Centralized `/logs` explorer for systemd and Docker sources, bounded snapshots, loaded-line filtering, and audited log reads.
+
+### Docker and Linux operations
+- Docker container inventory, inspect, stats, bounded logs, start/stop/restart/pause/unpause/remove actions, and Compose project/service management through typed agent commands.
+- systemd service inventory plus audited start/stop/restart actions. Unit names are strictly validated and CloudDeck exposes no unrestricted shell-command endpoint.
+- Realtime Docker/systemd log subscriptions using one-time WebSocket tickets and bounded in-memory UI buffers.
+
+### Deployments
+- GitHub App installation linking with installation-scoped repository/branch discovery.
+- Application source configuration for Dockerfile and Compose deployments.
+- BullMQ deployment queue and worker with per-application execution leases, cancellation, guarded state transitions, persisted progress/logs, and activation metadata.
+- Agent-side clone/build/deploy/readiness execution with bounded typed inputs.
+
+### Availability, domains, secrets, and backups
+- Health checks, alert lifecycle, and email/in-app notification pipeline.
+- Domain inventory and TLS certificate monitoring with expiry alerts and SSRF-safe public probing.
+- Optional least-privilege Caddy/Nginx proxy automation through a separate root helper.
+- Encrypted workspace secret storage using AES-256-GCM, metadata/value separation, audited rotation/deletion, and no plaintext list/read API.
+- Verified backups for allowlisted directories, Docker volumes, PostgreSQL, and MySQL to local or S3-compatible targets, with SHA-256 manifests, post-write verification, retention cleanup, recurring schedules, encrypted credentials, and confirmed restore workflows.
+
+### Mobile
+- Flutter app foundation with rotating refresh-token sessions and secure device storage.
+- Dashboard/server monitoring, historical metrics, alerts, notifications, deployment status, Docker inventory, bounded logs, and confirmed container restart for authorized operators.
+- Android and iOS CI packaging.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   Web[Next.js dashboard] --> API[Fastify API]
+  Mobile[Flutter app] --> API
   API --> PG[(PostgreSQL)]
-  API --> Redis[(Redis: jobs / future distributed realtime)]
+  API --> Redis[(Redis / BullMQ / realtime routing)]
   Agent[Go agent on managed host] -->|Outbound TLS WebSocket| API
   Agent --> Docker[Docker Engine Unix socket]
   Agent --> Systemd[systemd / journald]
 ```
 
-CloudDeck does not expose an unrestricted remote command API. Every non-terminal agent action must be explicitly typed, validated, authorized and auditable.
+CloudDeck deliberately separates the control plane from privileged host operations. Non-terminal host actions are explicitly typed, validated, authorized, and audited. There is no generic arbitrary-command API.
 
 ## Local development
 
-Requires Node 22, npm 11, PostgreSQL 17, and Go 1.23.
+Requires Node 22, npm 11, PostgreSQL 17, Redis, and Go 1.23.
 
 ```bash
 cp .env.example .env
@@ -70,7 +97,7 @@ sudo env CLOUDDECK_API_URL=https://api.example.com CLOUDDECK_SERVER_ID=<server-u
 unset CLOUDDECK_PAIRING_TOKEN
 ```
 
-The installer pairs once, saves the long-lived credential in a 0600 file and starts a dedicated systemd service. Docker access is opt-in via `CLOUDDECK_DOCKER_SOCKET=/var/run/docker.sock`; Docker group membership is effectively root-equivalent. systemd service control also requires the local CloudDeck service account to have only the specific sudo/polkit permissions needed in the deployment. Do not grant unrestricted passwordless sudo.
+The installer pairs once, saves the long-lived credential in a `0600` file, and starts a dedicated systemd service. Docker access is opt-in via `CLOUDDECK_DOCKER_SOCKET=/var/run/docker.sock`; Docker group membership is effectively root-equivalent. systemd service control should receive only the specific sudo/polkit permissions required by the deployment. Do not grant unrestricted passwordless sudo.
 
 ### Optional proxy helper
 
@@ -90,17 +117,25 @@ import /etc/caddy/clouddeck.d/*
 
 The helper refuses Caddy changes unless that import exists. Nginx apply verifies the generated `conf.d` file is present in `nginx -T` before reload.
 
-See [agent protocol](docs/AGENT_PROTOCOL.md), [security](docs/SECURITY.md), [architecture](docs/ARCHITECTURE.md), and [deployment](docs/DEPLOYMENT.md).
+## Documentation
 
-## Roadmap
+- [Feature status](docs/FEATURE_STATUS.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Agent protocol](docs/AGENT_PROTOCOL.md)
+- [Security](docs/SECURITY.md)
+- [Deployment](docs/DEPLOYMENT.md)
 
-1. Foundation: auth, organizations, database, dashboard — functional baseline.
-2. Agent: pairing, heartbeat, telemetry, one-minute aggregation, hourly downsampling/retention — functional baseline; distributed connection routing still pending.
-3. Operations: Docker lifecycle/inspection, Compose service controls, systemd management, bounded snapshots, and realtime Docker/systemd logs — functional baseline.
-4. Browser terminal — dedicated permission, one-time tickets, PTY lifecycle, audit records, resize/input channels, a 30-minute limit, and xterm.js server-detail UI with automatic fitting/resize.
-5. Deployments — guarded state machine/read APIs, verified GitHub App linking, installation-scoped repository/branch discovery, and validated Application source configuration implemented; next: BullMQ execution, health activation, and rollback orchestration.
-6. Health checks, alert rules and email/in-app notifications.
-7. Domains/TLS monitoring, constrained Caddy/Nginx proxy automation, encrypted secrets, verified local/S3-compatible backups, recurring scheduling, and all supported restore workflows are functional; encrypted backup payloads remain.
-8. Flutter monitoring and emergency-operation mobile app — foundation and core monitoring/emergency surfaces implemented; Android/iOS platform packaging, push notifications, and release artifacts remain.
+## Current roadmap
 
-No UI or API response claims a pending feature was performed.
+The main product surfaces and operational workflows are functional. Remaining work is focused on production hardening and release depth rather than placeholder construction:
+
+1. End-to-end browser coverage for critical operator workflows.
+2. Broader cross-workspace isolation, concurrency, and failure-mode integration tests.
+3. Control-plane metrics/tracing, queue dashboards, SLOs, and operational runbooks.
+4. Encrypted backup payloads at rest in addition to existing encrypted credentials and transport protections.
+5. Richer rollout strategies such as staged/canary/blue-green orchestration where appropriate.
+6. Explicit workspace owner transfer.
+7. Mobile release signing/store automation and deeper parity with the web console.
+8. Disaster-recovery drills and larger multi-instance/load tests.
+
+See [docs/FEATURE_STATUS.md](docs/FEATURE_STATUS.md) for the detailed implementation matrix and remaining gaps.
