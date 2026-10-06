@@ -9,7 +9,7 @@ CloudDeck is a production-oriented multi-server operations and observability pla
 ### Control plane
 - Next.js web dashboard with centralized fleet, container, metrics, logs, deployment, backup, health, alert, domain, secrets, audit, member, and security surfaces.
 - Fastify API with PostgreSQL, Redis, BullMQ, WebSockets, Argon2id passwords, short-lived JWTs, rotating/revocable refresh sessions, optional TOTP two-factor authentication, RBAC, audit logs, verification/reset flows, and workspace-scoped authorization.
-- Personal/team workspaces with member invitations, invitation revocation/acceptance, role management, owner safeguards, and global workspace search.
+- Personal/team workspaces with member invitations, invitation revocation/acceptance, role management, explicit owner-only ownership transfer, owner safeguards, and global workspace search.
 
 ### Server agent and realtime
 - Go Linux agent with outbound authenticated WebSocket, one-time pairing, heartbeat telemetry, reconnect, and protected credential storage.
@@ -130,12 +130,11 @@ The helper refuses Caddy changes unless that import exists. Nginx apply verifies
 The main product surfaces and operational workflows are functional. Remaining work is focused on production hardening and release depth rather than placeholder construction:
 
 1. End-to-end browser coverage for critical operator workflows.
-2. Broader cross-workspace isolation, concurrency, and failure-mode integration tests.
+2. Broader concurrency and failure-mode integration tests; the highest-value cross-workspace isolation paths now have dedicated integration coverage.
 3. Control-plane metrics/tracing, queue dashboards, SLOs, and operational runbooks.
 4. Encrypted backup payloads at rest in addition to existing encrypted credentials and transport protections.
 5. Richer rollout strategies such as staged/canary/blue-green orchestration where appropriate.
-6. Explicit workspace owner transfer.
-7. Mobile release signing/store automation and deeper parity with the web console.
-8. Disaster-recovery drills and larger multi-instance/load tests.
+6. Mobile release signing/store automation and deeper parity with the web console.
+7. Disaster-recovery drills and larger multi-instance/load tests.
 
 See [docs/FEATURE_STATUS.md](docs/FEATURE_STATUS.md) for the detailed implementation matrix and remaining gaps.
