@@ -55,7 +55,6 @@ jobs:
       CLOUDDECK_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       APP_ORIGIN: http://127.0.0.1:3000
       NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
-      NODE_ENV: production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -65,12 +64,12 @@ jobs:
       - run: node apps/web/e2e/seed.mjs
       - run: npm install --no-save @playwright/test@1.55.0
       - run: npx playwright install --with-deps chromium
-      - run: npm run build
+      - run: NODE_ENV=production npm run build
       - name: Start CloudDeck API and web
         run: |
           NODE_ENV=development PORT=4000 npm run start -w @clouddeck/api > /tmp/clouddeck-api.log 2>&1 &
           echo $! > /tmp/clouddeck-api.pid
-          PORT=3000 npm run start -w @clouddeck/web > /tmp/clouddeck-web.log 2>&1 &
+          NODE_ENV=production PORT=3000 npm run start -w @clouddeck/web > /tmp/clouddeck-web.log 2>&1 &
           echo $! > /tmp/clouddeck-web.pid
           for i in {1..60}; do
             if curl --fail --silent http://127.0.0.1:4000/health >/dev/null && curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then
