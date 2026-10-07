@@ -28,7 +28,7 @@ test('operator can sign in, open the server fleet, and create a pairing token',a
 
   await expect(page.getByText('Pairing token — shown once, expires in 10 minutes')).toBeVisible();
   await expect(page.getByRole('heading',{name:'E2E Server'})).toBeVisible();
-  await expect(page.getByText('Awaiting agent pairing')).toBeVisible();
+  await expect(page.getByText('Awaiting agent pairing',{exact:true})).toBeVisible();
 });
 
 test('invalid password stays on the login screen and surfaces the auth error',async({page})=>{
@@ -38,5 +38,5 @@ test('invalid password stays on the login screen and surfaces the auth error',as
   await page.getByRole('button',{name:/Sign in/}).click();
 
   await expect(page).toHaveURL(/\/login$/);
-  await expect(page.getByRole('alert')).toContainText('Invalid credentials');
+  await expect(page.getByText('Invalid credentials',{exact:true})).toBeVisible();
 });
