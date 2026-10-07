@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports, no-undef */
 const {test,expect}=require('@playwright/test');
 
 const baseURL='http://127.0.0.1:3000';
