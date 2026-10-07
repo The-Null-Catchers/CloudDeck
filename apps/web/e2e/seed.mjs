@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import argon2 from 'argon2';
 import pg from 'pg';
 
