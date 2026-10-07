@@ -97,6 +97,7 @@ if (process.env.NODE_ENV !== 'test') {
   let stopNotificationQueueReconciler=()=>{};
   let stopBackupRunner=()=>{};
   let stopMetricRollupRunner=()=>{};
+  let shuttingDown=false;
 
   app.addHook('onClose',async()=>{
     stopSweep();
@@ -113,6 +114,28 @@ if (process.env.NODE_ENV !== 'test') {
     await closeDeploymentWorker();
     await closeDeploymentQueue();
   });
+
+  const shutdown=async(signal:'SIGTERM'|'SIGINT')=>{
+    if(shuttingDown)return;
+    shuttingDown=true;
+    app.log.info({signal},'Graceful shutdown started');
+    const forceExit=setTimeout(()=>{
+      app.log.error({signal},'Graceful shutdown timed out');
+      process.exit(1);
+    },15000);
+    try{
+      await app.close();
+      clearTimeout(forceExit);
+      app.log.info({signal},'Graceful shutdown completed');
+    }catch(error){
+      clearTimeout(forceExit);
+      app.log.error({err:error,signal},'Graceful shutdown failed');
+      process.exitCode=1;
+    }
+  };
+
+  process.once('SIGTERM',()=>void shutdown('SIGTERM'));
+  process.once('SIGINT',()=>void shutdown('SIGINT'));
 
   await app.listen({host:'0.0.0.0',port:Number(process.env.PORT ?? 4000)});
   startRealtimeRouter();
