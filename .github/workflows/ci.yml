@@ -67,7 +67,7 @@ jobs:
       - run: NODE_ENV=production npm run build
       - name: Start CloudDeck API and web
         run: |
-          NODE_ENV=development PORT=4000 npm run start -w @clouddeck/api > /tmp/clouddeck-api.log 2>&1 &
+          NODE_ENV=development PORT=4000 node apps/api/dist/index.js > /tmp/clouddeck-api.log 2>&1 &
           echo $! > /tmp/clouddeck-api.pid
           NODE_ENV=production PORT=3000 npm run start -w @clouddeck/web > /tmp/clouddeck-web.log 2>&1 &
           echo $! > /tmp/clouddeck-web.pid
@@ -83,6 +83,29 @@ jobs:
           exit 1
       - name: Run browser E2E tests
         run: npx playwright test apps/web/e2e/auth-dashboard.spec.cjs --browser=chromium --workers=1 --reporter=line
+      - name: Verify API graceful shutdown
+        run: |
+          pid="$(cat /tmp/clouddeck-api.pid)"
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo 'API exited before graceful-shutdown verification'
+            cat /tmp/clouddeck-api.log || true
+            exit 1
+          fi
+          kill -TERM "$pid"
+          for i in {1..20}; do
+            if ! kill -0 "$pid" 2>/dev/null; then
+              if grep -q 'Graceful shutdown completed' /tmp/clouddeck-api.log; then
+                exit 0
+              fi
+              echo 'API exited without completing its graceful-shutdown path'
+              cat /tmp/clouddeck-api.log || true
+              exit 1
+            fi
+            sleep 1
+          done
+          echo 'API did not exit within the graceful-shutdown window'
+          cat /tmp/clouddeck-api.log || true
+          exit 1
       - name: Print service logs on failure
         if: failure()
         run: |
