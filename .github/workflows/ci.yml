@@ -33,6 +33,69 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: {POSTGRES_USER: clouddeck, POSTGRES_PASSWORD: testpass, POSTGRES_DB: clouddeck}
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U clouddeck" --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgres://clouddeck:testpass@localhost:5432/clouddeck
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-e2e-secret-at-least-thirty-two-characters
+      CLOUDDECK_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      APP_ORIGIN: http://127.0.0.1:3000
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22', cache: npm}
+      - run: npm ci
+      - run: npm run migrate
+      - run: node apps/web/e2e/seed.mjs
+      - run: npm install --no-save @playwright/test@1.55.0
+      - run: npx playwright install --with-deps chromium
+      - run: NODE_ENV=production npm run build
+      - name: Start CloudDeck API and web
+        run: |
+          NODE_ENV=development PORT=4000 npm run start -w @clouddeck/api > /tmp/clouddeck-api.log 2>&1 &
+          echo $! > /tmp/clouddeck-api.pid
+          NODE_ENV=production PORT=3000 npm run start -w @clouddeck/web > /tmp/clouddeck-web.log 2>&1 &
+          echo $! > /tmp/clouddeck-web.pid
+          for i in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:4000/health >/dev/null && curl --fail --silent http://127.0.0.1:3000/login >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'CloudDeck services failed to become ready'
+          cat /tmp/clouddeck-api.log || true
+          cat /tmp/clouddeck-web.log || true
+          exit 1
+      - name: Run browser E2E tests
+        run: npx playwright test apps/web/e2e/auth-dashboard.spec.cjs --browser=chromium --workers=1 --reporter=line
+      - name: Print service logs on failure
+        if: failure()
+        run: |
+          echo '--- API log ---'
+          cat /tmp/clouddeck-api.log || true
+          echo '--- Web log ---'
+          cat /tmp/clouddeck-web.log || true
+      - name: Stop CloudDeck services
+        if: always()
+        run: |
+          kill $(cat /tmp/clouddeck-api.pid 2>/dev/null) 2>/dev/null || true
+          kill $(cat /tmp/clouddeck-web.pid 2>/dev/null) 2>/dev/null || true
+
   agent:
     runs-on: ubuntu-latest
     defaults: {run: {working-directory: services/agent}}

@@ -90,17 +90,14 @@ export function buildApp() {
 
 if (process.env.NODE_ENV !== 'test') {
   const app=buildApp();
-  await app.listen({host:'0.0.0.0',port:Number(process.env.PORT ?? 4000)});
-  startRealtimeRouter();
-  const stopSweep=startOfflineSweep();
-  const stopDeploymentQueueReconciler=startDeploymentQueueReconciler();
-  startDeploymentWorker();
-  const stopHealthCheckRunner=startHealthCheckRunner();
-  const stopDomainTlsRunner=startDomainTlsRunner();
-  const stopNotificationQueueReconciler=startNotificationQueueReconciler();
-  startNotificationWorker();
-  const stopBackupRunner=startBackupRunner();
-  const stopMetricRollupRunner=startMetricRollupRunner();
+  let stopSweep=()=>{};
+  let stopDeploymentQueueReconciler=()=>{};
+  let stopHealthCheckRunner=()=>{};
+  let stopDomainTlsRunner=()=>{};
+  let stopNotificationQueueReconciler=()=>{};
+  let stopBackupRunner=()=>{};
+  let stopMetricRollupRunner=()=>{};
+
   app.addHook('onClose',async()=>{
     stopSweep();
     stopDeploymentQueueReconciler();
@@ -116,4 +113,16 @@ if (process.env.NODE_ENV !== 'test') {
     await closeDeploymentWorker();
     await closeDeploymentQueue();
   });
+
+  await app.listen({host:'0.0.0.0',port:Number(process.env.PORT ?? 4000)});
+  startRealtimeRouter();
+  stopSweep=startOfflineSweep();
+  stopDeploymentQueueReconciler=startDeploymentQueueReconciler();
+  startDeploymentWorker();
+  stopHealthCheckRunner=startHealthCheckRunner();
+  stopDomainTlsRunner=startDomainTlsRunner();
+  stopNotificationQueueReconciler=startNotificationQueueReconciler();
+  startNotificationWorker();
+  stopBackupRunner=startBackupRunner();
+  stopMetricRollupRunner=startMetricRollupRunner();
 }
