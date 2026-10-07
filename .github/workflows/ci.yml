@@ -55,7 +55,7 @@ jobs:
       CLOUDDECK_MASTER_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
       APP_ORIGIN: http://127.0.0.1:3000
       NEXT_PUBLIC_API_URL: http://127.0.0.1:4000
-      NODE_ENV: development
+      NODE_ENV: production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -68,7 +68,7 @@ jobs:
       - run: npm run build
       - name: Start CloudDeck API and web
         run: |
-          PORT=4000 npm run start -w @clouddeck/api > /tmp/clouddeck-api.log 2>&1 &
+          NODE_ENV=development PORT=4000 npm run start -w @clouddeck/api > /tmp/clouddeck-api.log 2>&1 &
           echo $! > /tmp/clouddeck-api.pid
           PORT=3000 npm run start -w @clouddeck/web > /tmp/clouddeck-web.log 2>&1 &
           echo $! > /tmp/clouddeck-web.pid
