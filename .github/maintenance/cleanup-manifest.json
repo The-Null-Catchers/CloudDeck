@@ -1,0 +1,125 @@
+{
+  "repository": "The-Null-Catchers/CloudDeck",
+  "defaultBranch": "main",
+  "baseSHA": "b9c97b8e1842ac21ecc17c292454586ae5203f03",
+  "backupTag": "cleanup-backup-2026-11-16",
+  "delete": [
+    {
+      "name": "feat/agent-ha-hardening",
+      "sha": "8afbd6502e110b9522ca90d6a19ba4582449b62f",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/demo-workspace",
+      "sha": "475fdcbda4b162e4b089a565fc274b0ed9391c38",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/distributed-agent-command-routing",
+      "sha": "11e395f9c030c3aa9cfc34b2c5176d9b5c6fb27a",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/distributed-realtime-stream-routing",
+      "sha": "fd13f6fb4b6fa23de86034b9b5693d640310092a",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/encrypted-local-backups",
+      "sha": "a9a69b39e05743a9cd403b31a5fd80ecb377f087",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/encrypted-s3-backups",
+      "sha": "e41ce9348d7e408b344b36642b5145df8a851e4a",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/flutter-fcm-client",
+      "sha": "4526cae7f382358aa7a23ffbe1fe9c0b9f4145be",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/flutter-ios-build",
+      "sha": "84ba73f7283c0b471ee0cd45b29b4d94e525de7e",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/mobile-push-navigation",
+      "sha": "947d4b023061db8ee5da16a10cb67b287be6e642",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/push-notification-backend",
+      "sha": "b5b11f2475ac2f54ef591dd3d7306490092336d3",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feat/totp-2fa",
+      "sha": "0562f67bcd70245dfb0817680ae49a0ef43c3221",
+      "reason": "ancestor"
+    },
+    {
+      "name": "perf/targeted-realtime-routing",
+      "sha": "0aa65bc137455edceb0c6924e582c83ac7b45a4b",
+      "reason": "ancestor"
+    },
+    {
+      "name": "test/distributed-realtime-integration",
+      "sha": "1666d778deee598241fcfa70e8fd78ba2bc0b623",
+      "reason": "ancestor"
+    },
+    {
+      "name": "test/distributed-router-integration",
+      "sha": "6162921ea8fd7cdd9f5e10538acb8743aae5aedd",
+      "reason": "ancestor"
+    },
+    {
+      "name": "feature/database-backups-ui",
+      "sha": "d5b46f41df3a164000a3b7030a0d9c15fc5eb64e",
+      "reason": "equivalent"
+    },
+    {
+      "name": "feature/systemd-logs",
+      "sha": "d784037b7ddca87d3086453cdce159d46d72c05e",
+      "reason": "equivalent"
+    },
+    {
+      "name": "test/deployment-lease-concurrency",
+      "sha": "87248201622e5726a4794419f717a96b2e0b188a",
+      "reason": "equivalent"
+    },
+    {
+      "name": "test/deployment-transition-race",
+      "sha": "beb49eb94c571d6f9728a3169fb979f65ad4e490",
+      "reason": "equivalent"
+    },
+    {
+      "name": "fix/api-graceful-shutdown",
+      "sha": "e5e6d510ba0755a65323b09a9030d9fbaa9f79e3",
+      "reason": "tree-identical"
+    }
+  ],
+  "status": "Explicit user approval received: archive then delete audited SHAs",
+  "archiveParents": [
+    "8afbd6502e110b9522ca90d6a19ba4582449b62f",
+    "475fdcbda4b162e4b089a565fc274b0ed9391c38",
+    "11e395f9c030c3aa9cfc34b2c5176d9b5c6fb27a",
+    "fd13f6fb4b6fa23de86034b9b5693d640310092a",
+    "a9a69b39e05743a9cd403b31a5fd80ecb377f087",
+    "e41ce9348d7e408b344b36642b5145df8a851e4a",
+    "4526cae7f382358aa7a23ffbe1fe9c0b9f4145be",
+    "84ba73f7283c0b471ee0cd45b29b4d94e525de7e",
+    "947d4b023061db8ee5da16a10cb67b287be6e642",
+    "b5b11f2475ac2f54ef591dd3d7306490092336d3",
+    "0562f67bcd70245dfb0817680ae49a0ef43c3221",
+    "0aa65bc137455edceb0c6924e582c83ac7b45a4b",
+    "1666d778deee598241fcfa70e8fd78ba2bc0b623",
+    "6162921ea8fd7cdd9f5e10538acb8743aae5aedd",
+    "d5b46f41df3a164000a3b7030a0d9c15fc5eb64e",
+    "d784037b7ddca87d3086453cdce159d46d72c05e",
+    "87248201622e5726a4794419f717a96b2e0b188a",
+    "beb49eb94c571d6f9728a3169fb979f65ad4e490",
+    "e5e6d510ba0755a65323b09a9030d9fbaa9f79e3"
+  ]
+}
