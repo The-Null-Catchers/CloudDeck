@@ -85,7 +85,11 @@ func (m *terminalManager) read(id string,process *terminalProcess,command *exec.
   }
   if err!=nil{streamInterrupted=!errors.Is(err,io.EOF);break}
  }
+ // Stop the shell before waiting when output can no longer be delivered.
+ // Otherwise an interactive shell may stay alive forever with no reader.
+ if streamInterrupted{process.cancel()}
  waitErr:=command.Wait()
+ process.cancel()
  m.mu.Lock()
  current:=m.sessions[id]
  active:=current==process
