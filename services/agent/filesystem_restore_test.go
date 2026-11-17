@@ -2,6 +2,7 @@ package main
 
 import (
  "context"
+ "encoding/json"
  "net"
  "net/http"
  "os"
@@ -66,6 +67,15 @@ func TestDockerVolumeRestoreRequiresUnusedVolume(t *testing.T){
  listener,err:=net.Listen("unix",socket);if err!=nil{t.Fatal(err)}
  mux:=http.NewServeMux()
  mux.HandleFunc("/containers/json",func(w http.ResponseWriter,r *http.Request){
+  if r.URL.Query().Get("all")!="1"||r.URL.Query().Has("limit"){
+   t.Error("volume inventory must include all containers without a list limit")
+   http.Error(w,"incomplete inventory",http.StatusBadRequest);return
+  }
+  var filters map[string][]string
+  if err:=json.Unmarshal([]byte(r.URL.Query().Get("filters")),&filters);err!=nil||len(filters["volume"])!=1||filters["volume"][0]!="app-data"{
+   t.Error("volume inventory must filter by the exact volume")
+   http.Error(w,"missing volume filter",http.StatusBadRequest);return
+  }
   w.Header().Set("Content-Type","application/json")
   _,_=w.Write([]byte(`[{"Mounts":[{"Type":"volume","Name":"app-data"}]}]`))
  })

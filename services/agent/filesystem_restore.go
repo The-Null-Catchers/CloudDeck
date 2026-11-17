@@ -10,6 +10,7 @@ import (
  "errors"
  "io"
  "net/http"
+ "net/url"
  "os"
  "path/filepath"
  "strings"
@@ -27,7 +28,10 @@ type filesystemRestorePayload struct {
 
 func dockerVolumeInUse(name string)(bool,error){
  if !backupVolumeName.MatchString(name){return false,errors.New("invalid Docker volume name")}
- res,err:=dockerRequest(http.MethodGet,"/containers/json?all=1&limit=500")
+ // Filter at the Engine so an older container cannot be hidden by a list limit.
+ // Include stopped containers: they still reference the volume.
+ filters,_:=json.Marshal(map[string][]string{"volume":{name}})
+ res,err:=dockerRequest(http.MethodGet,"/containers/json?all=1&filters="+url.QueryEscape(string(filters)))
  if err!=nil{return false,err}
  defer res.Body.Close()
  var rows []struct{
