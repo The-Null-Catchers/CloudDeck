@@ -86,6 +86,11 @@ export function normalizeHealthTarget(kind:HealthKind,target:string){
   return value;
 }
 
+function targetHostname(url:URL){
+  // WHATWG URL retains IPv6 brackets; DNS, sockets and TLS expect the bare address.
+  return url.hostname.startsWith('[')?url.hostname.slice(1,-1):url.hostname;
+}
+
 async function resolvePublic(hostname:string){
   if(net.isIP(hostname)){
     if(!isPublicHealthAddress(hostname))throw new Error('Health checks cannot target private or reserved addresses');
@@ -99,9 +104,10 @@ async function resolvePublic(hostname:string){
 
 async function httpProbe(kind:'http'|'https',target:string,timeoutSeconds:number,expectedStatus:number|null):Promise<HealthProbeResult>{
   const url=new URL(target);
+  const hostname=targetHostname(url);
   const started=Date.now();
   try{
-    const resolved=await resolvePublic(url.hostname);
+    const resolved=await resolvePublic(hostname);
     const transport=kind==='https'?https:http;
     return await new Promise(resolve=>{
       let settled=false;
@@ -111,7 +117,7 @@ async function httpProbe(kind:'http'|'https',target:string,timeoutSeconds:number
         port:url.port?Number(url.port):(kind==='https'?443:80),
         method:'GET',
         path:url.pathname+url.search,
-        servername:kind==='https'&&!net.isIP(url.hostname)?url.hostname:undefined,
+        servername:kind==='https'&&!net.isIP(hostname)?hostname:undefined,
         headers:{Host:url.host,'User-Agent':'CloudDeck-Health/1.0',Accept:'*/*',Connection:'close'},
         timeout:timeoutSeconds*1000
       },res=>{
@@ -134,7 +140,7 @@ async function tcpProbe(target:string,timeoutSeconds:number):Promise<HealthProbe
   const parsed=new URL('tcp://'+target);
   const started=Date.now();
   try{
-    const resolved=await resolvePublic(parsed.hostname);
+    const resolved=await resolvePublic(targetHostname(parsed));
     return await new Promise(resolve=>{
       let settled=false;
       const socket=net.createConnection({host:resolved.address,port:Number(parsed.port)});
