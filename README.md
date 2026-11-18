@@ -138,3 +138,7 @@ The main product surfaces and operational workflows are functional. Remaining wo
 7. Disaster-recovery drills and larger multi-instance/load tests.
 
 See [docs/FEATURE_STATUS.md](docs/FEATURE_STATUS.md) for the detailed implementation matrix and remaining gaps.
+
+## Portfolio roadmap
+
+See the [repository-specific portfolio roadmap](PORTFOLIO_ROADMAP.md) for priorities, acceptance criteria, demo scope, and release evidence. This complements the existing implementation and status documentation.
