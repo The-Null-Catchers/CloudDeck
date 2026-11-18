@@ -1,44 +1,52 @@
-# CloudDeck — خطة البورتفيليو
+# CloudDeck portfolio roadmap
 
-مرجع التقييم الأساسي: 17 نوفمبر 2026. تحديث نشر الخطة داخل المستودع: 18 نوفمبر 2026.
+Baseline reviewed on November 17, 2026. Repository roadmap published on November 18, 2026.
 
-الخطة خاصة بهذا المستودع، ومستخلصة من خطة Null Catchers المشتركة. وصف «الموجود الموثق» يعكس المراجعة بتاريخها؛ تحقّق من الكود ووثائق الحالة الحالية قبل إنشاء مهمة جديدة. لا تعِد تنفيذ ميزة موجودة، ولا تعتبر وجود تعريف CI دليلًا على نجاح تشغيله.
+This roadmap applies to this repository and follows the shared Null Catchers portfolio plan. Verify the documented state against the current code and runs before starting work.
 
-**تقدير شريحة العرض الأولى:** 30–50 ساعة. التقدير تخطيطي لمطور يعرف المشروع، ويستثني انتظار حسابات المتاجر والمراجعات الخارجية وتجهيز بيئة الهدف. لا يغطي جميع بنود P2.
+**Estimated initial demo effort** 30–50 hours for a developer familiar with the project. The estimate excludes external reviews, store accounts, target environment setup, and later milestones.
 
-## الأولويات الخاصة بالمشروع
+## Project priorities
 
-**الموجود الموثق:** agent Go، مراقبة وأوامر typed وterminal ونشر ونسخ واستعادة. README يعرض صورة placeholder، بينما FEATURE_STATUS يذكر حاجة إلى اختبارات تشغيل وتوسع وrestore evidence. فقرة roadmap في README قد تتأخر عن التنفيذ؛ افحص كود تشفير النسخ واختباراته قبل اعتبارها ميزة غائبة.
+**Documented state** The Go agent provides monitoring, typed operations, terminal sessions, deployment, backups, and restore. The feature status records operational, scale, and recovery evidence gaps. Check existing backup encryption code and tests before planning changes.
 
-**P0 — نسخة العرض:** استبدل placeholder بلقطات حقيقية. جهز مضيفين اصطناعيين أو مختبرًا معزولًا؛ سجل pairing وحالة offline وتنبيهًا وعملية container مسموحة وأخرى مرفوضة. أضف أدلة browser E2E للمسار المختار بدل اعتبار فحص auth وحده تغطية للعمليات.
+**P0 — Demo** Record agent pairing, disconnection, recovery, and a permission-controlled operation on a lab host. Replace the placeholder screenshot with evidence from a real run.
 
-**P1 — موثوقية العمليات:** راجع استعادة directory/volume خصوصًا الصلاحيات والملكية والإلغاء والملفات غير المدعومة؛ أضف اختبارات للحالات غير المغطاة، بما فيها صلاحية جذر الدليل بعد الاستعادة. تحقق من تشفير local/S3 والـround-trip الموجود قبل أي توسعة. نفذ control-plane restore في staging وسجل الزمن والبيانات المستعادة.
+**P1 — Validation and depth** Verify ownership, permissions, cancellation, unsupported files, and the restored directory root. Check local and S3 encryption and round trips. Rehearse control-plane restore in staging and record elapsed time and recovered data.
 
-**P2 — لاحقًا:** tracing وqueue SLOs، ثم rollout متدرج عند وجود تطبيق تجريبي يقيس فائدته. توقيع الموبايل يأتي بعد تجربة console.
+**P2 — Later** Add tracing, queue SLOs, and staged rollout when a pilot can measure their value. Address mobile signing after the console walkthrough.
 
-**معيار الإنجاز:** لا أمر تشغيل دون صلاحية، terminal منقطع لا يعلق التنظيف، واستعادة backup تعيد البيانات والصلاحيات المختبرة. الديمو العام للقراءة أو بعمليات مقيدة على مضيف تجريبي فقط.
+**Acceptance criteria** Only permitted operations run. Interrupted terminal sessions clean up, and backups restore the tested data and permissions. Public demos use read-only access or scoped operations on a lab host.
 
-**الديمو:** خادم يرتفع حمله → تنبيه → فحص logs → restart مسموح → عودة الحالة → سجل audit. **الأدلة:** [FEATURE_STATUS](https://github.com/The-Null-Catchers/CloudDeck/blob/main/docs/FEATURE_STATUS.md)، [PR #77](https://github.com/The-Null-Catchers/CloudDeck/pull/77).
+**Demo scenario** Increased load → alert → logs → permitted restart → recovery → audit record. [FEATURE_STATUS](https://github.com/The-Null-Catchers/CloudDeck/blob/main/docs/FEATURE_STATUS.md), [PR #77](https://github.com/The-Null-Catchers/CloudDeck/pull/77).
 
-## بوابة قبول نسخة البورتفيليو
+## Next milestones
 
-- [ ] يستطيع شخص آخر تشغيل المسار الرئيسي من checkout نظيف، باتباع README، دون أسرار شخصية.
-- [ ] توجد قصة واحدة مكتملة: مستخدم محدد، مشكلة محددة، ومسار بداية إلى نتيجة محفوظة.
-- [ ] ينجح اختبار للمسار الرئيسي وحالة فشل مهمة، وتُختبر حدود الصلاحيات حيث توجد حسابات متعددة.
-- [ ] توجد بيانات عرض اصطناعية معلنة، قابلة لإعادة الإنشاء؛ ولا توجد بيانات عملاء أو أسرار في اللقطات.
-- [ ] توجد 4–6 لقطات حقيقية أو العدد الملائم للأداة، وفيديو 60–120 ثانية، وروابط تعمل. تُلتقط الأدلة من إصدار معروف.
-- [ ] README يوضح المزايا الفعلية، طريقة التشغيل، الرسم المعماري، القيود، وروابط الاختبارات والديمو.
-- [ ] Case study قصيرة تشرح قرارين هندسيين، بديلًا جرى استبعاده ولماذا، وفشلًا حقيقيًا وكيف يعالجه النظام.
-- [ ] صفحة Release تسجل SHA وCI والمتطلبات والقيود. لا تُنشر أرقام أداء دون workload وعتاد وطريقة قياس.
-- [ ] حُسمت سياسة الترخيص ونسب المساهمات قبل التوزيع؛ لا نختار ترخيصًا تلقائيًا لجميع المستودعات.
+The [feature status](docs/FEATURE_STATUS.md) documents pairing, heartbeats, access roles, and auditing.
 
-الديمو المستضاف مفيد وليس شرطًا لكل أداة. أدوات تنفيذ الكود وإدارة الخوادم والأسرار يمكن عرضها بفيديو وبيئة معزولة وتجربة محلية قابلة للإعادة. لا تفتح تنفيذًا عامًا غير محدود لمجرد وجود رابط بورتفيليو.
+1. [ ] Pair an agent and show its metrics. Stop and restart it, confirming offline and online transitions and resumed measurements.
+2. [ ] Run an authorized operation on a test service and verify that a read-only account is denied. Record both outcomes.
+3. [ ] Capture pairing, status, and audit evidence with a SHA, timestamps, and test roles. Use synthetic or redacted pairing data.
 
-## التنفيذ والمتابعة
+## Portfolio acceptance checklist
 
-- حوّل P0 إلى مهام صغيرة، لكل منها سلوك متوقع ومعيار قبول واختبار مناسب.
-- ابدأ بتأكيد الموجود؛ عدّل هذه الخطة عندما يغلق بند بدليل مرتبط بcommit أو PR.
-- سجّل مصدر بيانات الديمو، والـSHA الذي التُقطت منه الأدلة، وحدود التجربة الفعلية.
-- راجع الفرق النهائي وانتظر نجاح الفحوص المطلوبة لنفس SHA قبل الدمج، مع احترام حماية الفرع.
-- إذا كان التعديل وثائق فقط ولا يوجد فحص ينطبق عليه، سجّل التحقق من محتواها وروابطها؛ لا تسجل اختبارات تشغيل لم تُنفّذ.
-- لا تُنشر أرقام أداء أو ادعاءات أمان أو جاهزية إنتاج بلا دليل مناسب.
+- [ ] Another person can reproduce the primary workflow from a clean checkout using the README and test credentials or fixtures.
+- [ ] The demo tells one complete story with a defined user, problem, and saved result.
+- [ ] Tests cover the main flow, an important failure, and access boundaries when multiple accounts are involved.
+- [ ] Demo data is labeled synthetic and reproducible. Review screenshots and recordings for secrets and customer data.
+- [ ] Include four to six real screenshots where appropriate, a 60–120 second recording, and working links. Identify the revision used for capture.
+- [ ] The README describes implemented capabilities, setup, architecture, limits, tests, and the demo.
+- [ ] A short case study explains two engineering decisions, a considered alternative, and how the system handles an actual failure.
+- [ ] Release evidence records the commit SHA, CI, prerequisites, and limits. Performance data includes workload, hardware, and method.
+- [ ] Licensing and contributor attribution are settled before distribution. Choose the license for each repository individually.
+
+A hosted demo is optional. Code execution, server administration, and secret management can be demonstrated through a recording and a reproducible isolated environment. Keep public demo access scoped to the activities it needs.
+
+## Implementation and follow-up
+
+- Break P0 into tasks with expected behavior, acceptance criteria, and a suitable test.
+- Verify existing functionality first. Update this plan when evidence tied to a commit or PR closes a milestone.
+- Record the fixture source, the revision used for evidence, and the tested limits.
+- Review the final diff and verify required checks for its exact SHA before merging. Follow branch protection.
+- For documentation-only changes with no applicable workflow, verify content and links and record the checks actually performed.
+- Tie performance, security, and readiness claims to supporting evidence.
