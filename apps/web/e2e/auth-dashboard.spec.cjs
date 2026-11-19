@@ -40,3 +40,26 @@ test('invalid password stays on the login screen and surfaces the auth error',as
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByText('Invalid credentials',{exact:true})).toBeVisible();
 });
+
+test('fleet hides server creation when the workspace role is viewer',async({page})=>{
+  // Override the displayed role only. The API still authenticates the seeded account.
+  await page.route('**/api/v1/organizations',async route=>{
+    const response=await route.fetch();
+    const body=await response.json();
+    await route.fulfill({
+      response,
+      json:{...body,organizations:body.organizations.map(org=>({...org,role:'viewer'}))}
+    });
+  });
+
+  await page.goto(`${baseURL}/login`);
+  await page.getByLabel('Email address').fill(email);
+  await page.getByLabel('Password').fill(password);
+  await page.getByRole('button',{name:/Sign in/}).click();
+  await expect(page).toHaveURL('**/dashboard');
+  await page.getByRole('button',{name:'Servers',exact:true}).click();
+
+  await expect(page.getByText('E2E Workspace · Servers',{exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Server fleet'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Add server'})).toHaveCount(0);
+});
