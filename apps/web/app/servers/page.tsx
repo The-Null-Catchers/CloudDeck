@@ -36,8 +36,10 @@ export default function ServersPage(){
 
   useEffect(()=>{void load();const timer=setInterval(()=>void load(true),15000);return()=>clearInterval(timer)},[]);
 
+  const canAddServer=org?.role==='owner'||org?.role==='admin';
+
   async function addServer(){
-    if(!org)return;
+    if(!org||!canAddServer)return;
     const name=prompt('Server name');
     if(!name?.trim())return;
     try{
@@ -61,7 +63,7 @@ export default function ServersPage(){
     <main className="deploy-content">
       <section className="deploy-hero">
         <div><span className="eyebrow">INFRASTRUCTURE / SERVERS</span><h1>Fleet inventory and health</h1><p>Track every connected server, current resource pressure, pairing state, and last agent contact from one place.</p></div>
-        <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button><button className="primary" onClick={()=>void addServer()}><Plus size={16}/> Add server</button></div>
+        <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button>{canAddServer&&<button className="primary" onClick={()=>void addServer()}><Plus size={16}/> Add server</button>}</div>
       </section>
 
       {error&&<div className="notice" role="status">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
