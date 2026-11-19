@@ -19,6 +19,7 @@ This document tracks the production-facing feature state of CloudDeck. A capabil
 - Current CPU, memory, and disk pressure in fleet views.
 - Per-server detail with historical metrics.
 - Go agent heartbeat, telemetry, reconnect, and protected credential storage.
+- The API integration suite pairs a synthetic WebSocket agent, verifies telemetry, runs the offline sweep after simulating an expired heartbeat, and confirms metrics and alerts recover on reconnect. It also verifies an operator can send the fixture a service restart and that a viewer cannot. The fixture acknowledges the command without touching systemd.
 
 ### Metrics and observability
 - One-minute metric buckets in PostgreSQL.
