@@ -3,13 +3,21 @@ import assert from 'node:assert/strict';
 import {buildApp} from '../src/index.ts';
 import {pool} from '../src/db.ts';
 
-test('workspace-scoped APIs reject authenticated users from other workspaces',async()=>{
+test('workspace-scoped APIs reject authenticated users from other workspaces and enforce viewer permissions',async t=>{
   const app=buildApp();
   await app.ready();
   const suffix=crypto.randomUUID();
   const ownerAEmail=`isolation-a-${suffix}@example.com`;
   const ownerBEmail=`isolation-b-${suffix}@example.com`;
   const password='a secure workspace isolation passphrase 2026';
+
+  t.after(async()=>{
+    try{
+      await pool.query('DELETE FROM users WHERE email IN ($1,$2)',[ownerAEmail,ownerBEmail]);
+    }finally{
+      await app.close();
+    }
+  });
 
   const ownerA=await app.inject({method:'POST',url:'/api/v1/auth/register',payload:{email:ownerAEmail,password}});
   const ownerB=await app.inject({method:'POST',url:'/api/v1/auth/register',payload:{email:ownerBEmail,password}});
@@ -56,6 +64,28 @@ test('workspace-scoped APIs reject authenticated users from other workspaces',as
   assert.equal(ownWorkspace.statusCode,200,ownWorkspace.body);
   assert.ok(ownWorkspace.json().servers.some((server:{id:string})=>server.id===serverId));
 
-  await pool.query('DELETE FROM users WHERE email IN ($1,$2)',[ownerAEmail,ownerBEmail]);
-  await app.close();
+  // Enroll the second fixture user after checking the non-member boundary.
+  const membership=await pool.query(
+    `INSERT INTO organization_members(organization_id,user_id,role)
+     SELECT $1,id,'viewer' FROM users WHERE email=$2`,
+    [orgA,ownerBEmail]
+  );
+  assert.equal(membership.rowCount,1);
+
+  const viewerHeaders={authorization:`Bearer ${tokenB}`};
+  const deniedCreate=await app.inject({
+    method:'POST',
+    url:'/api/v1/servers',
+    headers:viewerHeaders,
+    payload:{organizationId:orgA,name:'Viewer test server'}
+  });
+  assert.equal(deniedCreate.statusCode,403,deniedCreate.body);
+
+  const viewerFleet=await app.inject({
+    method:'GET',
+    url:`/api/v1/organizations/${orgA}/servers`,
+    headers:viewerHeaders
+  });
+  assert.equal(viewerFleet.statusCode,200,viewerFleet.body);
+  assert.deepEqual(viewerFleet.json(),ownWorkspace.json());
 });
