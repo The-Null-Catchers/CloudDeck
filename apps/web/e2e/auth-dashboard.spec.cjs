@@ -56,7 +56,7 @@ test('fleet hides server creation when the workspace role is viewer',async({page
   await page.getByLabel('Email address').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button',{name:/Sign in/}).click();
-  await expect(page).toHaveURL('**/dashboard');
+  await expect(page).toHaveURL(/\/dashboard$/);
   await page.getByRole('button',{name:'Servers',exact:true}).click();
 
   await expect(page.getByText('E2E Workspace · Servers',{exact:true})).toBeVisible();
