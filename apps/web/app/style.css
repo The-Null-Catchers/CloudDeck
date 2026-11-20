@@ -105,3 +105,5 @@
 .backup-credentials legend { padding: 0 .5rem; font-weight: 600; }
 
 .backup-credentials > p button { border: 1px solid var(--line); background: var(--paper); color: var(--blue); border-radius: 7px; padding: .5rem .7rem; font-size: .8rem; font-weight: 600; }
+
+.demo-action{border:1px solid #dce4f3;background:#fff;color:#4058bd;border-radius:7px;padding:10px 13px;font-size:12px;font-weight:700}.demo-action:hover{background:#f3f6ff}.demo-action:disabled{opacity:.6;cursor:wait}.dashboard-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.demo-readonly{align-self:center;border:1px solid #d6e4f5;border-radius:5px;padding:5px 8px;color:#526b9c;font-size:9px;font-weight:800;letter-spacing:.8px}
