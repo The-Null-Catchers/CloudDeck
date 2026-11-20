@@ -16,6 +16,7 @@ import (
  "regexp"
  "sort"
  "strings"
+ "strconv"
  "time"
 )
 
@@ -156,6 +157,9 @@ func uploadS3Backup(ctx context.Context,config s3BackupConfig,path,localStorageK
  extra:=map[string]string{"x-amz-meta-clouddeck-sha256":sha}
  key,encrypted,keyErr:=backupEncryptionKey()
  if keyErr!=nil{return "",keyErr}
+ if !encrypted{return "",errors.New("backup encryption is required for S3 uploads")}
+ keyVersion,versionErr:=backupEncryptionKeyVersion()
+ if versionErr!=nil{return "",versionErr}
  var encryptedPath string
  if encrypted{
   staging,err:=os.CreateTemp(filepath.Dir(path),".clouddeck-s3-encrypted-*")
@@ -169,7 +173,8 @@ func uploadS3Backup(ctx context.Context,config s3BackupConfig,path,localStorageK
   if err!=nil{return "",errors.New("unable to checksum encrypted backup payload")}
   uploadPath=encryptedPath
   contentType="application/octet-stream"
-  extra["x-amz-meta-clouddeck-encryption"]="aes-256-gcm-chunked-v1"
+  extra["x-amz-meta-clouddeck-encryption"]="aes-256-gcm-chunked-v2"
+  extra["x-amz-meta-clouddeck-key-version"]=strconv.FormatUint(uint64(keyVersion),10)
   extra["x-amz-meta-clouddeck-cipher-sha256"]=payloadHash
  }
  info,err:=os.Stat(uploadPath)
@@ -200,7 +205,7 @@ func uploadS3Backup(ctx context.Context,config s3BackupConfig,path,localStorageK
  if verified.ContentLength!=info.Size(){return "",errors.New("S3 verification size mismatch")}
  if !strings.EqualFold(strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-sha256")),sha){return "",errors.New("S3 verification checksum metadata mismatch")}
  if encrypted{
-  if strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-encryption"))!="aes-256-gcm-chunked-v1"{return "",errors.New("S3 verification encryption metadata mismatch")}
+  if strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-encryption"))!="aes-256-gcm-chunked-v2"{return "",errors.New("S3 verification encryption metadata mismatch")}
   if !strings.EqualFold(strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-cipher-sha256")),payloadHash){return "",errors.New("S3 verification cipher checksum metadata mismatch")}
  }
  return objectKey,nil
@@ -228,7 +233,7 @@ func downloadS3Backup(ctx context.Context,config s3BackupConfig,objectKey,destin
  remoteSHA:=strings.TrimSpace(response.Header.Get("x-amz-meta-clouddeck-sha256"))
  if !strings.EqualFold(remoteSHA,expectedSHA){return errors.New("S3 restore object checksum metadata mismatch")}
  encryption:=strings.TrimSpace(response.Header.Get("x-amz-meta-clouddeck-encryption"))
- if encryption!=""&&encryption!="aes-256-gcm-chunked-v1"{return errors.New("unsupported S3 backup encryption format")}
+ if encryption!=""&&encryption!="aes-256-gcm-chunked-v1"&&encryption!="aes-256-gcm-chunked-v2"{return errors.New("unsupported S3 backup encryption format")}
  if encryption==""{
   file,err:=os.OpenFile(destination,os.O_WRONLY|os.O_CREATE|os.O_EXCL,0600)
   if err!=nil{return errors.New("unable to create S3 restore staging file")}
@@ -246,9 +251,11 @@ func downloadS3Backup(ctx context.Context,config s3BackupConfig,objectKey,destin
  }
  cipherSHA:=strings.TrimSpace(response.Header.Get("x-amz-meta-clouddeck-cipher-sha256"))
  if !validBackupSHA(cipherSHA){return errors.New("encrypted S3 backup is missing a valid cipher checksum")}
- key,configured,keyErr:=backupEncryptionKey()
+ keyVersion:=uint32(1)
+ if encryption=="aes-256-gcm-chunked-v2"{raw:=strings.TrimSpace(response.Header.Get("x-amz-meta-clouddeck-key-version"));parsed,parseErr:=strconv.ParseUint(raw,10,32);if parseErr!=nil||parsed==0{return errors.New("encrypted S3 backup key version is invalid")};keyVersion=uint32(parsed)}
+ key,configured,keyErr:=backupEncryptionKeyForVersion(keyVersion)
  if keyErr!=nil{return keyErr}
- if !configured{return errors.New("encrypted S3 backup requires CLOUDDECK_BACKUP_ENCRYPTION_KEY")}
+ if !configured{return fmt.Errorf("encrypted S3 backup requires key version %d in the agent keyring",keyVersion)}
  encryptedFile,err:=os.CreateTemp(filepath.Dir(destination),".clouddeck-s3-ciphertext-*")
  if err!=nil{return errors.New("unable to create encrypted S3 restore staging file")}
  encryptedPath:=encryptedFile.Name()
