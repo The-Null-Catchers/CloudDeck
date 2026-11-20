@@ -8,7 +8,8 @@ import {api} from '@/lib/api';
 type Org={id:string;name:string;role:string;demo?:boolean};
 type Port={privatePort:number;publicPort?:number;type:string};
 type Container={id:string;name:string;image:string;state:string;status:string;ports:Port[];composeProject?:string;composeService?:string;serverId:string;serverName:string;serverHostname:string|null};
-type ServerStatus={id:string;name:string;hostname:string|null;status:string;error:string|null};
+type ServerRow={id:string;name:string;hostname:string|null;status:string};
+type ServerStatus=ServerRow&{error:string|null};
 type Payload={containers:Container[];servers:ServerStatus[]};
 
 function normalizeState(value:string){return value.toLowerCase()}
