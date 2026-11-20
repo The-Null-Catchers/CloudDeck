@@ -5,7 +5,7 @@ import {useRouter} from 'next/navigation';
 import {Activity,ArrowLeft,Boxes,Play,Pause,RefreshCw,RotateCw,Search,Server,Square,TriangleAlert} from 'lucide-react';
 import {api} from '@/lib/api';
 
-type Org={id:string;name:string;role:string};
+type Org={id:string;name:string;role:string;demo?:boolean};
 type Port={privatePort:number;publicPort?:number;type:string};
 type Container={id:string;name:string;image:string;state:string;status:string;ports:Port[];composeProject?:string;composeService?:string;serverId:string;serverName:string;serverHostname:string|null};
 type ServerStatus={id:string;name:string;hostname:string|null;status:string;error:string|null};
@@ -30,8 +30,17 @@ export default function ContainersPage(){
       const orgs=await api<{organizations:Org[]}>('/organizations');
       const selected=orgs.organizations[0];
       if(!selected)throw new Error('No workspace found');
-      const data=await api<Payload>(`/organizations/${selected.id}/docker/containers`);
-      setOrg(selected);setContainers(data.containers);setServers(data.servers);setError('');
+      if(selected.demo){
+        const fleet=await api<{servers:ServerRow[]}>(`/organizations/${selected.id}/servers`);
+        const server=fleet.servers.find(item=>item.name==='Production API')??fleet.servers[0];
+        setOrg(selected);
+        setServers(fleet.servers.map(item=>({...item,error:null})));
+        setContainers(server?[{id:'aaaaaaaaaaaa',name:'clouddeck-api',image:'clouddeck/api:demo',state:'running',status:'Synthetic fixture · read-only',ports:[{privatePort:4000,type:'tcp'}],composeProject:'clouddeck',composeService:'api',serverId:server.id,serverName:server.name,serverHostname:server.hostname}]:[]);
+      }else{
+        const data=await api<Payload>(`/organizations/${selected.id}/docker/containers`);
+        setOrg(selected);setContainers(data.containers);setServers(data.servers);
+      }
+      setError('');
     }catch(e){setError(e instanceof Error?e.message:'Unable to load containers')}
     finally{if(!silent)setLoading(false)}
   }
@@ -48,8 +57,10 @@ export default function ContainersPage(){
 
   const running=containers.filter(item=>normalizeState(item.state)==='running').length;
   const failedServers=servers.filter(item=>item.error).length;
+  const demoMode=org?.demo===true;
 
   async function act(container:Container,action:'start'|'stop'|'restart'){
+    if(org?.demo)return;
     const key=`${container.serverId}:${container.id}`;setBusy(key);setError('');
     try{
       await api(`/servers/${container.serverId}/docker/containers/${container.id}/action`,{method:'POST',body:JSON.stringify({action,confirm:true})});
@@ -62,6 +73,7 @@ export default function ContainersPage(){
     <header className="deploy-topbar"><button onClick={()=>router.push('/dashboard')}><ArrowLeft size={16}/> Dashboard</button><span><Activity size={18}/> clouddeck.</span><div>{org?.name??'Workspace'} · Containers</div></header>
     <main className="deploy-content">
       <section className="deploy-hero"><div><span className="eyebrow">WORKSPACE / CONTAINERS</span><h1>Docker across your fleet</h1><p>Inspect container state across all connected servers and perform common lifecycle actions from one place.</p></div><div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button></div></section>
+      {demoMode&&<div className="demo-banner"><div><strong>Synthetic Docker inventory</strong><span>This container is a read-only fixture. No Docker daemon is connected and no lifecycle action will be sent.</span></div><span className="demo-readonly">READ ONLY</span></div>}
       {error&&<div className="notice" role="status">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
       {failedServers>0&&<div className="notice" role="status"><TriangleAlert size={16}/> {failedServers} server{failedServers===1?'':'s'} could not return Docker inventory. Other servers are still shown.</div>}
       <section className="deploy-stats">
@@ -77,7 +89,7 @@ export default function ContainersPage(){
           {visible.map(container=>{const key=`${container.serverId}:${container.id}`;const isRunning=normalizeState(container.state)==='running';return <article className={`alert-row ${isRunning?'resolved':'open'}`} key={key}>
             <span className="alert-icon"><Boxes size={18}/></span>
             <div className="alert-copy"><div><strong>{container.name}</strong><span className={`health-state ${isRunning?'resolved':'failing'}`}>{container.state}</span></div><p>{container.image}</p><small>{container.serverName}{container.serverHostname?` · ${container.serverHostname}`:''}{container.composeProject?` · ${container.composeProject}/${container.composeService??''}`:''}</small>{container.ports.length>0&&<small>Ports: {container.ports.slice(0,6).map(port=>`${port.publicPort??'—'}→${port.privatePort}/${port.type}`).join(', ')}</small>}</div>
-            <div className="alert-actions">{isRunning?<button onClick={()=>void act(container,'stop')} disabled={busy===key}><Pause size={14}/> Stop</button>:<button className="primary" onClick={()=>void act(container,'start')} disabled={busy===key}><Play size={14}/> Start</button>}<button onClick={()=>void act(container,'restart')} disabled={busy===key}><RotateCw size={14}/> Restart</button><button onClick={()=>router.push(`/servers/${container.serverId}`)}>Server</button></div>
+            <div className="alert-actions">{!demoMode?<>{isRunning?<button onClick={()=>void act(container,'stop')} disabled={busy===key}><Pause size={14}/> Stop</button>:<button className="primary" onClick={()=>void act(container,'start')} disabled={busy===key}><Play size={14}/> Start</button>}<button onClick={()=>void act(container,'restart')} disabled={busy===key}><RotateCw size={14}/> Restart</button></>:<span className="health-state resolved">Read-only demo</span>}<button onClick={()=>router.push(`/servers/${container.serverId}`)}>Server</button></div>
           </article>})}
           {!visible.length&&!loading&&<div className="deployment-empty">No containers match the current filters.</div>}
           {loading&&<div className="deployment-empty">Loading container inventory…</div>}

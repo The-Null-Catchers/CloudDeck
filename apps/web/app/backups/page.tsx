@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {api} from '@/lib/api';
 
-type Org={id:string;name:string;role:string};
+type Org={id:string;name:string;role:string;demo?:boolean};
 type ServerRow={id:string;name:string;hostname:string|null;status:'online'|'offline'|'pending'};
 type BackupKind='directory'|'docker_volume'|'postgres'|'mysql';
 type BackupSecret={id:string;name:string;kind:string;description?:string|null};
@@ -65,7 +65,7 @@ export default function BackupsPage(){
   const [busy,setBusy]=useState<string|null>(null);
   const [error,setError]=useState('');
 
-  const canManage=org?.role==='owner'||org?.role==='admin';
+  const canManage=!org?.demo&&(org?.role==='owner'||org?.role==='admin');
   const isDatabase=form.kind==='postgres'||form.kind==='mysql';
   const isS3Target=form.targetType==='s3';
   const databaseSecrets=secrets.filter(item=>item.description!=='clouddeck:s3-target');
@@ -236,6 +236,7 @@ export default function BackupsPage(){
         <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading||busy!==null}><RefreshCw size={15}/> Refresh</button>{canManage&&<button className="primary" onClick={()=>showCreate?closeCreate():setShowCreate(true)} disabled={busy!==null}><Plus size={15}/> New backup job</button>}</div>
       </section>
 
+      {org?.demo&&<div className="demo-banner"><div><strong>Backup controls are disabled in the demo workspace</strong><span>No backup archive is fabricated here. Use a connected disposable lab agent to create and restore a real encrypted backup.</span></div><span className="demo-readonly">READ ONLY</span></div>}
       {error&&<div className="notice" role="status">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
 
       <section className="deploy-stats backup-stats">

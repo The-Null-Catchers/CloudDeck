@@ -69,8 +69,8 @@ async function createDemoWorkspace(db:pg.PoolClient,userId:string){
   );
 
   const appResult=await db.query(
-    `INSERT INTO applications(organization_id,server_id,name)
-     VALUES($1,$2,'CloudDeck API') RETURNING id`,
+    `INSERT INTO applications(organization_id,server_id,name,repository_full_name,branch,deployment_type,source_path,container_name,container_port,host_port,restart_policy)
+     VALUES($1,$2,'CloudDeck API','The-Null-Catchers/CloudDeck','main','dockerfile','.','clouddeck-api',4000,4400,'unless-stopped') RETURNING id`,
     [org.id,serverIds[0]]
   );
   const applicationId=appResult.rows[0].id as string;

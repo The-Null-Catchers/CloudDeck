@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import {api} from '@/lib/api';
 
-type Org={id:string;name:string;role:string};
+type Org={id:string;name:string;role:string;demo?:boolean};
 type Application={
   id:string;server_id:string;name:string;repository_full_name:string;branch:string;
   deployment_type:'dockerfile'|'compose';source_path:string;auto_deploy:boolean;
@@ -59,6 +59,7 @@ export default function DeploymentsPage(){
   },[]);
 
   async function deploy(application:Application){
+    if(org?.demo){setError('Deployment execution is disabled in the synthetic demo workspace.');return}
     setBusy(`deploy:${application.id}`);setError('');
     try{
       const created=await api<{id:string;dispatch:'enqueued'|'pending'}>(`/applications/${application.id}/deployments`,{
@@ -72,6 +73,7 @@ export default function DeploymentsPage(){
   }
 
   async function toggleAuto(application:Application){
+    if(org?.demo){setError('Auto-deploy changes are disabled in the synthetic demo workspace.');return}
     setBusy(`auto:${application.id}`);setError('');
     try{
       await api(`/applications/${application.id}/auto-deploy`,{
@@ -91,6 +93,7 @@ export default function DeploymentsPage(){
     ].some(value=>value?.toLowerCase().includes(q)));
   },[deployments,filter]);
 
+  const demoMode=org?.demo===true;
   const active=deployments.filter(item=>!terminalStates.has(item.state)).length;
   const failed=deployments.filter(item=>item.state==='failed').length;
   const successful=deployments.filter(item=>item.state==='successful').length;
@@ -109,9 +112,10 @@ export default function DeploymentsPage(){
           <h1>Ship with confidence</h1>
           <p>Deploy pinned GitHub commits, watch every stage, and roll back safely.</p>
         </div>
-        <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button><button className="primary" onClick={()=>router.push('/applications/new')}><Plus size={15}/> New application</button></div>
+        <div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void load()} disabled={loading}><RefreshCw size={15}/> Refresh</button>{!demoMode&&<button className="primary" onClick={()=>router.push('/applications/new')}><Plus size={15}/> New application</button>}</div>
       </section>
 
+      {demoMode&&<div className="demo-banner"><div><strong>Synthetic deployment history</strong><span>These records demonstrate deployment states and event history. No GitHub installation or external deployment is invoked.</span></div><span className="demo-readonly">READ ONLY</span></div>}
       {error&&<div className="notice" role="status">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
 
       <section className="deploy-stats">
@@ -137,11 +141,11 @@ export default function DeploymentsPage(){
             <div className="runtime-line"><Server size={14}/><span>{application.server_name??'Server'}</span><i className={application.server_status==='online'?'online':'offline'}/></div>
             <div className="runtime-target">{application.deployment_type==='compose'?application.compose_project:application.container_name}</div>
             <div className="application-actions">
-              <button className="auto-toggle" onClick={()=>void toggleAuto(application)} disabled={busy===`auto:${application.id}`}>
+              <button className="auto-toggle" onClick={()=>void toggleAuto(application)} disabled={demoMode||busy===`auto:${application.id}`}>
                 {application.auto_deploy?<ToggleRight size={20}/>:<ToggleLeft size={20}/>}
                 Auto-deploy {application.auto_deploy?'on':'off'}
               </button>
-              <button className="primary" onClick={()=>void deploy(application)} disabled={busy===`deploy:${application.id}`}>
+              <button className="primary" onClick={()=>void deploy(application)} disabled={demoMode||busy===`deploy:${application.id}`}>
                 <Rocket size={15}/>{busy===`deploy:${application.id}`?'Starting…':'Deploy now'}
               </button>
             </div>
