@@ -52,7 +52,7 @@ This document tracks the production-facing feature state of CloudDeck. A capabil
 - Domain/TLS inventory and certificate monitoring.
 - Email/in-app notification pipeline.
 - Encrypted workspace secrets.
-- Verified backups to local or S3-compatible targets.
+- Verified AES-256-GCM encrypted backup payloads to local or S3-compatible targets, with versioned key metadata and ciphertext SHA-256.
 - Recurring backup schedules and retention cleanup.
 - PostgreSQL, MySQL, directory, and Docker-volume restore workflows.
 - Optional constrained Caddy/Nginx proxy helper.
@@ -79,7 +79,7 @@ The core platform is functional. Remaining work is mostly release hardening and 
 - End-to-end browser tests for critical operator flows.
 - Broader API integration coverage for concurrency and failure modes; cross-workspace isolation coverage now protects the highest-value organization-scoped surfaces.
 - Production observability for the CloudDeck control plane itself (structured metrics/traces, queue dashboards, SLOs).
-- Encrypted backup payloads at rest before upload/storage, in addition to encrypted credentials and transport protections.
+- Validate encrypted backup restore against a disposable Linux host and S3-compatible object store, including key rotation and corrupted-ciphertext failure cases.
 - Deployment rollout policies beyond the current single-target activation model (for example canary/blue-green orchestration where appropriate).
 - Mobile release signing/store automation and broader feature parity with the web console.
 - Additional multi-instance/load testing for agent routing, terminal routing, and concurrent deployments.
