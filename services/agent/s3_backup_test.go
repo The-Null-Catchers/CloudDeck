@@ -4,6 +4,7 @@ import (
  "crypto/sha256"
  "encoding/hex"
  "context"
+ "encoding/base64"
  "fmt"
  "io"
  "net/http"
@@ -23,10 +24,14 @@ func TestS3BackupUploadsAndVerifiesBeforeSuccess(t *testing.T){
  staging:=t.TempDir()
  t.Setenv("CLOUDDECK_BACKUP_SOURCE_ROOTS",sourceRoot)
  t.Setenv("CLOUDDECK_BACKUP_DIR",staging)
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY",base64.StdEncoding.EncodeToString(testEncryptionKey()))
 
  var mu sync.Mutex
  var uploaded []byte
  var checksum string
+ var cipherChecksum string
+ var encryptionFormat string
+ var keyVersion string
  var putAuth string
  var gotPath string
  server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
@@ -37,11 +42,17 @@ func TestS3BackupUploadsAndVerifiesBeforeSuccess(t *testing.T){
   case http.MethodPut:
    putAuth=r.Header.Get("Authorization")
    checksum=r.Header.Get("x-amz-meta-clouddeck-sha256")
+   cipherChecksum=r.Header.Get("x-amz-meta-clouddeck-cipher-sha256")
+   encryptionFormat=r.Header.Get("x-amz-meta-clouddeck-encryption")
+   keyVersion=r.Header.Get("x-amz-meta-clouddeck-key-version")
    uploaded,_=io.ReadAll(r.Body)
    w.WriteHeader(http.StatusOK)
   case http.MethodHead:
    w.Header().Set("Content-Length",fmt.Sprintf("%d",len(uploaded)))
    w.Header().Set("x-amz-meta-clouddeck-sha256",checksum)
+   w.Header().Set("x-amz-meta-clouddeck-cipher-sha256",cipherChecksum)
+   w.Header().Set("x-amz-meta-clouddeck-encryption",encryptionFormat)
+   w.Header().Set("x-amz-meta-clouddeck-key-version",keyVersion)
    w.WriteHeader(http.StatusOK)
   default:
    w.WriteHeader(http.StatusMethodNotAllowed)
@@ -61,6 +72,12 @@ func TestS3BackupUploadsAndVerifiesBeforeSuccess(t *testing.T){
  })
  if err!=nil{t.Fatal(err)}
  if !result.Verified{t.Fatal("S3 backup must be verified before success")}
+ if result.Encryption==nil||result.Encryption.Algorithm!=backupEncryptionAlgorithm||result.Encryption.KeyVersion!=1{t.Fatalf("missing encryption metadata: %+v",result.Encryption)}
+ if result.SizeBytes!=int64(len(uploaded)){t.Fatal("result size must describe encrypted S3 payload")}
+ cipherSum:=sha256.Sum256(uploaded)
+ if result.Encryption.CipherSHA256!=hex.EncodeToString(cipherSum[:]){t.Fatal("cipher checksum mismatch")}
+ if encryptionFormat!="aes-256-gcm-chunked-v2"||keyVersion!="1"{t.Fatal("missing S3 encryption headers")}
+ if strings.Contains(string(uploaded),"clouddeck-s3-backup"){t.Fatal("S3 payload contains plaintext test data")}
  if result.StorageKey!="prod/api/88888888-8888-4888-8888-888888888888.tar.gz"{t.Fatalf("unexpected storage key %q",result.StorageKey)}
  if !strings.HasPrefix(putAuth,"AWS4-HMAC-SHA256 Credential=access-key/"){t.Fatalf("missing SigV4 authorization: %q",putAuth)}
  if checksum!=result.SHA256{t.Fatalf("metadata checksum %q differs from result %q",checksum,result.SHA256)}
@@ -78,6 +95,7 @@ func TestS3BackupFailsWhenHeadVerificationDoesNotMatch(t *testing.T){
  staging:=t.TempDir()
  t.Setenv("CLOUDDECK_BACKUP_SOURCE_ROOTS",sourceRoot)
  t.Setenv("CLOUDDECK_BACKUP_DIR",staging)
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY",base64.StdEncoding.EncodeToString(testEncryptionKey()))
 
  var size int
  server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
@@ -87,6 +105,8 @@ func TestS3BackupFailsWhenHeadVerificationDoesNotMatch(t *testing.T){
   case http.MethodHead:
    w.Header().Set("Content-Length",fmt.Sprintf("%d",size))
    w.Header().Set("x-amz-meta-clouddeck-sha256",strings.Repeat("0",64))
+   w.Header().Set("x-amz-meta-clouddeck-encryption","aes-256-gcm-chunked-v2")
+   w.Header().Set("x-amz-meta-clouddeck-key-version","1")
    w.WriteHeader(http.StatusOK)
   }
  }))
