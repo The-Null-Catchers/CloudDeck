@@ -5,7 +5,7 @@ import {useRouter} from 'next/navigation';
 import {Activity,ArrowLeft,Box,RefreshCw,Search,Server,ScrollText,SquareTerminal} from 'lucide-react';
 import {api} from '@/lib/api';
 
-type Org={id:string;name:string;role:string};
+type Org={id:string;name:string;role:string;demo?:boolean};
 type ServerRow={id:string;name:string;hostname:string|null;status:string};
 type Service={name:string;load:string;active:string;sub:string;description:string};
 type Container={id:string;name:string;image:string;state:string;status:string;serverId:string;serverName:string;serverHostname:string|null};
@@ -17,21 +17,64 @@ export default function LogsPage(){
   const [org,setOrg]=useState<Org|null>(null);const [servers,setServers]=useState<ServerRow[]>([]);const [services,setServices]=useState<Service[]>([]);const [containers,setContainers]=useState<Container[]>([]);
   const [source,setSource]=useState<Source>('systemd');const [serverId,setServerId]=useState('');const [target,setTarget]=useState('');const [limit,setLimit]=useState(200);const [result,setResult]=useState<LogResult|null>(null);const [query,setQuery]=useState('');const [loading,setLoading]=useState(true);const [busy,setBusy]=useState(false);const [error,setError]=useState('');
 
-  useEffect(()=>{let active=true;(async()=>{try{const orgs=await api<{organizations:Org[]}>('/organizations');const selected=orgs.organizations[0];if(!selected)throw new Error('No workspace found');const [fleet,docker]=await Promise.all([api<{servers:ServerRow[]}>(`/organizations/${selected.id}/servers`),api<{containers:Container[]}>(`/organizations/${selected.id}/docker/containers`)]);if(!active)return;setOrg(selected);setServers(fleet.servers);setContainers(docker.containers);const first=fleet.servers.find(s=>s.status==='online')??fleet.servers[0];if(first)setServerId(first.id)}catch(e){if(active)setError(e instanceof Error?e.message:'Unable to load log sources')}finally{if(active)setLoading(false)}})();return()=>{active=false}},[]);
+  useEffect(()=>{let active=true;(async()=>{try{
+    const orgs=await api<{organizations:Org[]}>('/organizations');
+    const selected=orgs.organizations[0];
+    if(!selected)throw new Error('No workspace found');
+    const fleet=await api<{servers:ServerRow[]}>(`/organizations/${selected.id}/servers`);
+    const first=fleet.servers.find(server=>server.status==='online')??fleet.servers[0];
+    if(!active)return;
+    setOrg(selected);setServers(fleet.servers);if(first)setServerId(first.id);
+    if(selected.demo){
+      setContainers(first?[{id:'aaaaaaaaaaaa',name:'clouddeck-api',image:'clouddeck/api:demo',state:'running',status:'Synthetic fixture',serverId:first.id,serverName:first.name,serverHostname:first.hostname}]:[]);
+    }else{
+      const docker=await api<{containers:Container[]}>(`/organizations/${selected.id}/docker/containers`);
+      if(active)setContainers(docker.containers);
+    }
+  }catch(e){if(active)setError(e instanceof Error?e.message:'Unable to load log sources')}finally{if(active)setLoading(false)}})();return()=>{active=false}},[]);
 
-  useEffect(()=>{if(source!=='systemd'||!serverId){setServices([]);if(source==='systemd')setTarget('');return}let active=true;(async()=>{try{const data=await api<{services:Service[]}>(`/servers/${serverId}/services`);if(!active)return;setServices(data.services);setTarget(current=>data.services.some(s=>s.name===current)?current:(data.services[0]?.name??''));setError('')}catch(e){if(active){setServices([]);setTarget('');setError(e instanceof Error?e.message:'Unable to load services')}}})();return()=>{active=false}},[source,serverId]);
+  useEffect(()=>{
+    if(source!=='systemd'||!serverId){setServices([]);if(source==='systemd')setTarget('');return}
+    if(org?.demo){
+      const sample:Service[]=[
+        {name:'clouddeck-api.service',load:'loaded',active:'active',sub:'running',description:'CloudDeck API service'},
+        {name:'clouddeck-worker.service',load:'loaded',active:'active',sub:'running',description:'Background job worker'},
+        {name:'postgresql.service',load:'loaded',active:'active',sub:'running',description:'PostgreSQL database'}
+      ];
+      setServices(sample);setTarget(current=>sample.some(service=>service.name===current)?current:sample[0].name);return;
+    }
+    let active=true;(async()=>{try{const data=await api<{services:Service[]}>(`/servers/${serverId}/services`);if(!active)return;setServices(data.services);setTarget(current=>data.services.some(service=>service.name===current)?current:(data.services[0]?.name??''));setError('')}catch(e){if(active){setServices([]);setTarget('');setError(e instanceof Error?e.message:'Unable to load services')}}})();
+    return()=>{active=false};
+  },[source,serverId,org?.demo]);
 
   useEffect(()=>{if(source!=='docker')return;const available=containers.filter(c=>!serverId||c.serverId===serverId);setTarget(current=>available.some(c=>c.id===current)?current:(available[0]?.id??''))},[source,serverId,containers]);
 
-  async function loadLogs(){if(!serverId||!target)return;setBusy(true);setError('');try{const url=source==='systemd'?`/servers/${serverId}/logs/systemd?unit=${encodeURIComponent(target)}&limit=${limit}`:`/servers/${serverId}/docker/containers/${encodeURIComponent(target)}/logs?limit=${limit}`;setResult(await api<LogResult>(url))}catch(e){setError(e instanceof Error?e.message:'Unable to load logs')}finally{setBusy(false)}}
+  async function loadLogs(){
+    if(!serverId||!target)return;
+    setBusy(true);setError('');
+    try{
+      if(org?.demo){
+        const stamp=new Date().toISOString();
+        const host=servers.find(server=>server.id===serverId)?.hostname??'demo-host';
+        const lines=source==='systemd'
+          ?[`${stamp} ${host} ${target}[123]: service started`,`${stamp} ${host} ${target}[123]: health check passed`,`${stamp} ${host} ${target}[123]: request completed status=200`]
+          :[`${stamp} ${host} clouddeck-api[1]: listening on :4000`,`${stamp} ${host} clouddeck-api[1]: health check passed`,`${stamp} ${host} clouddeck-api[1]: request completed status=200`];
+        setResult({lines,truncated:false});return;
+      }
+      const url=source==='systemd'?`/servers/${serverId}/logs/systemd?unit=${encodeURIComponent(target)}&limit=${limit}`:`/servers/${serverId}/docker/containers/${encodeURIComponent(target)}/logs?limit=${limit}`;
+      setResult(await api<LogResult>(url));
+    }catch(e){setError(e instanceof Error?e.message:'Unable to load logs')}
+    finally{setBusy(false)}
+  }
   const targets=source==='systemd'?services:containers.filter(c=>c.serverId===serverId);
   const visible=useMemo(()=>{const lines=result?.lines??[];const needle=query.trim().toLowerCase();return needle?lines.filter(line=>line.toLowerCase().includes(needle)):lines},[result,query]);
   return <div className="deploy-page ops-page">
     <header className="deploy-topbar"><button onClick={()=>router.push('/dashboard')}><ArrowLeft size={16}/> Dashboard</button><span><Activity size={18}/> clouddeck.</span><div>{org?.name??'Workspace'} · Logs</div></header>
     <main className="deploy-content">
       <section className="deploy-hero"><div><span className="eyebrow">OBSERVABILITY / LOGS</span><h1>Centralized log explorer</h1><p>Inspect systemd and Docker logs from every connected server without leaving the workspace view.</p></div><div className="deploy-hero-actions"><button className="deploy-refresh" onClick={()=>void loadLogs()} disabled={busy||!target}><RefreshCw size={15}/> {busy?'Loading…':'Refresh logs'}</button></div></section>
+      {org?.demo&&<div className="demo-banner"><div><strong>Synthetic log stream</strong><span>These bounded sample lines are generated locally for the portfolio walkthrough. No remote host is queried.</span></div><span className="demo-readonly">SIMULATED</span></div>}
       {error&&<div className="notice" role="status">{error}<button onClick={()=>setError('')}>Dismiss</button></div>}
-      <section className="deploy-section"><div className="deploy-section-head"><div><h2>Log source</h2><p>Select a server and runtime source. Log reads are audited by CloudDeck.</p></div></div>
+      <section className="deploy-section"><div className="deploy-section-head"><div><h2>Log source</h2><p>Select a server and runtime source. {org?.demo?'Sample log lines are synthetic and read-only.':'Log reads are audited by CloudDeck.'}</p></div></div>
         <div className="alert-filters" style={{marginBottom:16}}><button className={source==='systemd'?'active':''} onClick={()=>{setSource('systemd');setResult(null)}}><SquareTerminal size={14}/> systemd</button><button className={source==='docker'?'active':''} onClick={()=>{setSource('docker');setResult(null)}}><Box size={14}/> Docker</button></div>
         <div className="form-grid">
           <label><span>Server</span><select value={serverId} onChange={e=>{setServerId(e.target.value);setTarget('');setResult(null)}} disabled={loading}>{servers.map(server=><option key={server.id} value={server.id}>{server.name} · {server.hostname??server.status}</option>)}</select></label>

@@ -34,6 +34,7 @@ type backupExecutePayload struct {
 
 type backupExecutionResult struct {
  StorageKey string `json:"storageKey"`
+ Encryption *backupEncryptionMetadata `json:"encryption,omitempty"`
  SizeBytes int64 `json:"sizeBytes"`
  SHA256 string `json:"sha256"`
  Verified bool `json:"verified"`

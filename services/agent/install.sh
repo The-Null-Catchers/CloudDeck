@@ -9,6 +9,13 @@ fi
 : "${CLOUDDECK_SERVER_ID:?Set CLOUDDECK_SERVER_ID}"
 : "${CLOUDDECK_PAIRING_TOKEN:?Set CLOUDDECK_PAIRING_TOKEN}"
 : "${CLOUDDECK_AGENT_BIN:?Set CLOUDDECK_AGENT_BIN to a locally built binary}"
+: "${CLOUDDECK_BACKUP_ENCRYPTION_KEY:?Set CLOUDDECK_BACKUP_ENCRYPTION_KEY to a base64-encoded 32-byte key}"
+CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION=${CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION:-1}
+case "$CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION" in ''|*[!0-9]*|0) echo "Invalid backup encryption key version." >&2; exit 1 ;; esac
+# Validate the active key without printing it or invoking external key tools.
+case "$CLOUDDECK_BACKUP_ENCRYPTION_KEY" in
+  *[!a-zA-Z0-9+/=]*|'') echo "Invalid backup encryption key encoding." >&2; exit 1 ;;
+esac
 
 case "$CLOUDDECK_API_URL" in
   https://*) ;;
@@ -40,7 +47,9 @@ unset CLOUDDECK_PAIRING_TOKEN
 
 config_tmp=$(mktemp /etc/clouddeck-agent/agent.env.XXXXXX)
 trap 'rm -f "$config_tmp"' EXIT HUP INT TERM
-printf 'CLOUDDECK_API_URL=%s\nCLOUDDECK_SERVER_ID=%s\nCLOUDDECK_CREDENTIAL_FILE=/var/lib/clouddeck-agent/credential.json\n' "$CLOUDDECK_API_URL" "$CLOUDDECK_SERVER_ID" > "$config_tmp"
+# Root-owned 0600 EnvironmentFile is read by systemd before dropping to clouddeck.
+# Never print the key or embed it in the unit itself.
+printf 'CLOUDDECK_API_URL=%s\nCLOUDDECK_SERVER_ID=%s\nCLOUDDECK_CREDENTIAL_FILE=/var/lib/clouddeck-agent/credential.json\nCLOUDDECK_BACKUP_ENCRYPTION_KEY=%s\nCLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION=%s\n' "$CLOUDDECK_API_URL" "$CLOUDDECK_SERVER_ID" "$CLOUDDECK_BACKUP_ENCRYPTION_KEY" "$CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION" > "$config_tmp"
 chmod 0600 "$config_tmp"
 mv "$config_tmp" /etc/clouddeck-agent/agent.env
 trap - EXIT HUP INT TERM

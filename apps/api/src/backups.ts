@@ -85,7 +85,8 @@ const runResult=z.object({
   sizeBytes:z.number().int().nonnegative(),
   sha256:z.string().regex(/^[a-f0-9]{64}$/),
   verified:z.literal(true),
-  entryCount:z.number().int().nonnegative()
+  entryCount:z.number().int().nonnegative(),
+  encryption:z.object({algorithm:z.literal('AES-256-GCM-CHUNKED'),keyVersion:z.number().int().positive(),cipherSha256:z.string().regex(/^[a-f0-9]{64}$/)}).strict()
 }).strict();
 
 async function backupJob(jobId:string){
@@ -165,10 +166,10 @@ export async function executeBackupJob(jobId:string,trigger:BackupTrigger){
       const updated=await db.query(
         `UPDATE backups
          SET status='successful',size_bytes=$2,verified_at=now(),finished_at=now(),storage_key=$3,sha256=$4,
-             manifest=jsonb_build_object('entryCount',$5,'verification',CASE WHEN $6='s3' THEN 'archive-read+sha256+s3-head' ELSE 'archive-read+sha256' END)
+             manifest=jsonb_build_object('entryCount',$5,'verification',CASE WHEN $6='s3' THEN 'archive-read+sha256+s3-head' ELSE 'archive-read+sha256' END,'encryption',$7::jsonb)
          WHERE id=$1 AND status='running'
          RETURNING id,job_id,status,size_bytes,verified_at,started_at,finished_at,storage_key,sha256,manifest,created_at`,
-        [created.id,result.sizeBytes,result.storageKey,result.sha256,result.entryCount,job.target_type]
+        [created.id,result.sizeBytes,result.storageKey,result.sha256,result.entryCount,job.target_type,JSON.stringify(result.encryption)]
       );
       if(!updated.rowCount)throw new Error('Backup state changed unexpectedly');
       await audit(job.organization_id,trigger.actorId,'backup.run.completed','backup',created.id,trigger.ip,{

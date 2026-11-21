@@ -2,6 +2,7 @@ package main
 
 import (
  "context"
+ "encoding/base64"
  "encoding/json"
  "net"
  "net/http"
@@ -19,12 +20,19 @@ func TestDirectoryRestoreReplacesContentsFromVerifiedBackup(t *testing.T){
  backupDir:=t.TempDir()
  t.Setenv("CLOUDDECK_BACKUP_SOURCE_ROOTS",root)
  t.Setenv("CLOUDDECK_BACKUP_DIR",backupDir)
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY",base64.StdEncoding.EncodeToString(testEncryptionKey()))
 
  backup,err:=executeBackup(context.Background(),backupExecutePayload{
   BackupID:"10101010-1010-4010-8010-101010101010",
   Kind:"directory",Source:source,TargetType:"local",
  })
  if err!=nil{t.Fatal(err)}
+ if backup.Encryption==nil||backup.Encryption.Algorithm!=backupEncryptionAlgorithm||backup.Encryption.KeyVersion!=1{t.Fatalf("missing local backup encryption metadata: %+v",backup.Encryption)}
+ archive,err:=localBackupArchivePath(backup.StorageKey)
+ if err!=nil{t.Fatal(err)}
+ cipherSHA,err:=backupFileSHA256(archive)
+ if err!=nil{t.Fatal(err)}
+ if cipherSHA!=backup.Encryption.CipherSHA256{t.Fatal("local encrypted archive checksum does not match manifest")}
  if err:=os.WriteFile(filepath.Join(source,"nested","value.txt"),[]byte("after"),0600);err!=nil{t.Fatal(err)}
  if err:=os.WriteFile(filepath.Join(source,"extra.txt"),[]byte("remove-me"),0600);err!=nil{t.Fatal(err)}
 
@@ -47,6 +55,7 @@ func TestDirectoryRestoreChecksumFailureDoesNotMutateTarget(t *testing.T){
  backupDir:=t.TempDir()
  t.Setenv("CLOUDDECK_BACKUP_SOURCE_ROOTS",root)
  t.Setenv("CLOUDDECK_BACKUP_DIR",backupDir)
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY",base64.StdEncoding.EncodeToString(testEncryptionKey()))
  backup,err:=executeBackup(context.Background(),backupExecutePayload{
   BackupID:"20202020-2020-4020-8020-202020202020",Kind:"directory",Source:source,TargetType:"local",
  })
