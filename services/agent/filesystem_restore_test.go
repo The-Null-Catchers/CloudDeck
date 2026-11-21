@@ -27,6 +27,12 @@ func TestDirectoryRestoreReplacesContentsFromVerifiedBackup(t *testing.T){
   Kind:"directory",Source:source,TargetType:"local",
  })
  if err!=nil{t.Fatal(err)}
+ if backup.Encryption==nil||backup.Encryption.Algorithm!=backupEncryptionAlgorithm||backup.Encryption.KeyVersion!=1{t.Fatalf("missing local backup encryption metadata: %+v",backup.Encryption)}
+ archive,err:=localBackupArchivePath(backup.StorageKey)
+ if err!=nil{t.Fatal(err)}
+ cipherSHA,err:=backupFileSHA256(archive)
+ if err!=nil{t.Fatal(err)}
+ if cipherSHA!=backup.Encryption.CipherSHA256{t.Fatal("local encrypted archive checksum does not match manifest")}
  if err:=os.WriteFile(filepath.Join(source,"nested","value.txt"),[]byte("after"),0600);err!=nil{t.Fatal(err)}
  if err:=os.WriteFile(filepath.Join(source,"extra.txt"),[]byte("remove-me"),0600);err!=nil{t.Fatal(err)}
 
