@@ -2,7 +2,9 @@
 
 CloudDeck is a production-oriented multi-server operations and observability platform for developers, DevOps engineers, and small teams. It combines server monitoring, Docker operations, Linux service control, deployments, logs, uptime monitoring, backups, alerts, secure remote access, and workspace collaboration in one control plane.
 
-![Dashboard screenshot placeholder](docs/dashboard-placeholder.svg)
+> **Portfolio capture pending:** genuine application screenshots will be added under `docs/images/portfolio/` after a reproducible synthetic demo run. The previous placeholder is deliberately not presented as evidence.
+
+[Portfolio demo instructions](docs/PORTFOLIO_DEMO.md) · [Engineering case study](docs/CASE_STUDY.md) · [Verification evidence](docs/PORTFOLIO_EVIDENCE.md)
 
 ## What is implemented
 
@@ -85,6 +87,10 @@ npm run build
 cd services/agent && go test ./... && go build ./...
 ```
 
+## Backup encryption requirement
+
+New local and S3 backup payloads require a base64-encoded 32-byte `CLOUDDECK_BACKUP_ENCRYPTION_KEY` in the **agent environment**. Set `CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION` to a positive integer (default `1`). When rotating keys, retain older versions as `CLOUDDECK_BACKUP_ENCRYPTION_KEY_V<version>` until every backup encrypted with them has expired or been safely migrated. Do not commit keys to Git or include them in screenshots. Backups fail closed when the active key is absent or invalid.
+
 ## Pair an agent
 
 Create a server in the dashboard and use its server ID and one-time pairing token:
@@ -93,6 +99,7 @@ Create a server in the dashboard and use its server ID and one-time pairing toke
 cd services/agent
 go build -o clouddeck-agent .
 read -rs CLOUDDECK_PAIRING_TOKEN
+# Configure CLOUDDECK_BACKUP_ENCRYPTION_KEY securely in the agent environment first.
 sudo env CLOUDDECK_API_URL=https://api.example.com CLOUDDECK_SERVER_ID=<server-uuid> CLOUDDECK_PAIRING_TOKEN="$CLOUDDECK_PAIRING_TOKEN" CLOUDDECK_AGENT_BIN="$PWD/clouddeck-agent" ./install.sh
 unset CLOUDDECK_PAIRING_TOKEN
 ```
@@ -124,6 +131,9 @@ The helper refuses Caddy changes unless that import exists. Nginx apply verifies
 - [Agent protocol](docs/AGENT_PROTOCOL.md)
 - [Security](docs/SECURITY.md)
 - [Deployment](docs/DEPLOYMENT.md)
+- [Engineering case study](docs/CASE_STUDY.md)
+- [Portfolio demo](docs/PORTFOLIO_DEMO.md)
+- [Portfolio evidence and remaining gates](docs/PORTFOLIO_EVIDENCE.md)
 
 ## Current roadmap
 
@@ -132,7 +142,7 @@ The main product surfaces and operational workflows are functional. Remaining wo
 1. End-to-end browser coverage for critical operator workflows.
 2. Broader concurrency and failure-mode integration tests; the highest-value cross-workspace isolation paths now have dedicated integration coverage.
 3. Control-plane metrics/tracing, queue dashboards, SLOs, and operational runbooks.
-4. Encrypted backup payloads at rest in addition to existing encrypted credentials and transport protections.
+4. Validate authenticated local/S3 backup payload encryption, versioned keys, and isolated restore drills at the exact release SHA.
 5. Richer rollout strategies such as staged/canary/blue-green orchestration where appropriate.
 6. Mobile release signing/store automation and deeper parity with the web console.
 7. Disaster-recovery drills and larger multi-instance/load tests.
