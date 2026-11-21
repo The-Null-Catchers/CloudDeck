@@ -18,6 +18,9 @@ GitHub Actions run [44915953761](https://github.com/The-Null-Catchers/CloudDeck/
 
 These results predate the latest fixes and MUST NOT be presented as validation of the current head.
 
+## Verified CI after backup fixes
+Both [run 44917477816](https://github.com/The-Null-Catchers/CloudDeck/actions/runs/44917477816) and [run 44917494754](https://github.com/The-Null-Catchers/CloudDeck/actions/runs/44917494754) completed successfully at exact head `a71bb0767c72c8cb48c35e253ed31164fabc257d`. Each reported green jobs for Node, browser E2E, Go agent, Android, and unsigned iOS. This verifies that historical commit, **not any later documentation or implementation changes**.
+
 ## Changes pending latest CI verification
 - Fix malformed Go JSON struct tags for backup encryption metadata.
 - Require authenticated encryption for local and S3 backup payloads.
