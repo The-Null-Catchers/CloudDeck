@@ -2,6 +2,7 @@ package main
 
 import (
  "context"
+ "encoding/base64"
  "encoding/json"
  "net"
  "net/http"
@@ -19,6 +20,7 @@ func TestDirectoryRestoreReplacesContentsFromVerifiedBackup(t *testing.T){
  backupDir:=t.TempDir()
  t.Setenv("CLOUDDECK_BACKUP_SOURCE_ROOTS",root)
  t.Setenv("CLOUDDECK_BACKUP_DIR",backupDir)
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY",base64.StdEncoding.EncodeToString(testEncryptionKey()))
 
  backup,err:=executeBackup(context.Background(),backupExecutePayload{
   BackupID:"10101010-1010-4010-8010-101010101010",
@@ -47,6 +49,7 @@ func TestDirectoryRestoreChecksumFailureDoesNotMutateTarget(t *testing.T){
  backupDir:=t.TempDir()
  t.Setenv("CLOUDDECK_BACKUP_SOURCE_ROOTS",root)
  t.Setenv("CLOUDDECK_BACKUP_DIR",backupDir)
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY",base64.StdEncoding.EncodeToString(testEncryptionKey()))
  backup,err:=executeBackup(context.Background(),backupExecutePayload{
   BackupID:"20202020-2020-4020-8020-202020202020",Kind:"directory",Source:source,TargetType:"local",
  })
