@@ -30,9 +30,9 @@ type backupEncryptionHeader struct{
 }
 
 type backupEncryptionMetadata struct{
- Algorithm string \`json:"algorithm"\`
- KeyVersion uint32 \`json:"keyVersion"\`
- CipherSHA256 string \`json:"cipherSha256"\`
+ Algorithm string `json:"algorithm"`
+ KeyVersion uint32 `json:"keyVersion"`
+ CipherSHA256 string `json:"cipherSha256"`
 }
 
 func backupEncryptionKeyVersion()(uint32,error){
