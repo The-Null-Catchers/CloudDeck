@@ -99,8 +99,8 @@ Create a server in the dashboard and use its server ID and one-time pairing toke
 cd services/agent
 go build -o clouddeck-agent .
 # Start a temporary root shell to avoid putting secrets in command-line arguments.
-sudo -s
-# From inside that root shell, in the services/agent directory:
+sudo bash
+# From inside that root Bash shell, in the services/agent directory:
 read -rs -p "One-time pairing token: " CLOUDDECK_PAIRING_TOKEN; echo
 read -rs -p "Backup encryption key (base64, 32 bytes): " CLOUDDECK_BACKUP_ENCRYPTION_KEY; echo
 export CLOUDDECK_PAIRING_TOKEN CLOUDDECK_BACKUP_ENCRYPTION_KEY
