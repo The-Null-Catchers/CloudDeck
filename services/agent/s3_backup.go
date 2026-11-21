@@ -319,7 +319,12 @@ func executeBackup(ctx context.Context,payload backupExecutePayload)(backupExecu
   if err!=nil{_ = deleteLocalBackup(result.StorageKey);return backupExecutionResult{},err}
   size,err:=encryptLocalBackupAtRest(path)
   if err!=nil{_ = deleteLocalBackup(result.StorageKey);return backupExecutionResult{},err}
+  cipherSHA,err:=backupFileSHA256(path)
+  if err!=nil{_ = deleteLocalBackup(result.StorageKey);return backupExecutionResult{},errors.New("unable to checksum encrypted local backup")}
+  keyVersion,err:=backupEncryptionKeyVersion()
+  if err!=nil{_ = deleteLocalBackup(result.StorageKey);return backupExecutionResult{},err}
   result.SizeBytes=size
+  result.Encryption=&backupEncryptionMetadata{Algorithm:backupEncryptionAlgorithm,KeyVersion:keyVersion,CipherSHA256:cipherSHA}
   result.Verified=true
   return result,nil
  }
@@ -333,9 +338,13 @@ func executeBackup(ctx context.Context,payload backupExecutePayload)(backupExecu
  path,err:=localBackupArchivePath(result.StorageKey)
  if err!=nil{_ = deleteLocalBackup(result.StorageKey);return backupExecutionResult{},err}
  defer func(){_ = os.Remove(path)}()
- objectKey,err:=uploadS3Backup(ctx,*payload.S3,path,result.StorageKey,result.SHA256)
+ var metadata backupEncryptionMetadata
+ var encryptedSize int64
+ objectKey,err:=uploadS3BackupWithMetadata(ctx,*payload.S3,path,result.StorageKey,result.SHA256,&metadata,&encryptedSize)
  if err!=nil{return backupExecutionResult{},err}
  result.StorageKey=objectKey
+ result.SizeBytes=encryptedSize
+ result.Encryption=&metadata
  result.Verified=true
  return result,nil
 }
