@@ -148,6 +148,11 @@ func emptySHA256()string{
 }
 
 func uploadS3Backup(ctx context.Context,config s3BackupConfig,path,localStorageKey,sha string)(string,error){
+ return uploadS3BackupWithMetadata(ctx,config,path,localStorageKey,sha,nil,nil)
+}
+
+// The metadata is returned only after the remote object passes HEAD verification.
+func uploadS3BackupWithMetadata(ctx context.Context,config s3BackupConfig,path,localStorageKey,sha string,metadata *backupEncryptionMetadata,sizeBytes *int64)(string,error){
  if err:=validateS3BackupConfig(&config);err!=nil{return "",err}
  objectKey,err:=s3BackupObjectKey(config,localStorageKey)
  if err!=nil{return "",err}
@@ -206,7 +211,10 @@ func uploadS3Backup(ctx context.Context,config s3BackupConfig,path,localStorageK
  if !strings.EqualFold(strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-sha256")),sha){return "",errors.New("S3 verification checksum metadata mismatch")}
  if encrypted{
   if strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-encryption"))!="aes-256-gcm-chunked-v2"{return "",errors.New("S3 verification encryption metadata mismatch")}
+  if strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-key-version"))!=strconv.FormatUint(uint64(keyVersion),10){return "",errors.New("S3 verification encryption key version mismatch")}
   if !strings.EqualFold(strings.TrimSpace(verified.Header.Get("x-amz-meta-clouddeck-cipher-sha256")),payloadHash){return "",errors.New("S3 verification cipher checksum metadata mismatch")}
+  if metadata!=nil{*metadata=backupEncryptionMetadata{Algorithm:backupEncryptionAlgorithm,KeyVersion:keyVersion,CipherSHA256:payloadHash}}
+  if sizeBytes!=nil{*sizeBytes=info.Size()}
  }
  return objectKey,nil
 }
