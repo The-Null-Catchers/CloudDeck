@@ -98,10 +98,15 @@ Create a server in the dashboard and use its server ID and one-time pairing toke
 ```bash
 cd services/agent
 go build -o clouddeck-agent .
-read -rs CLOUDDECK_PAIRING_TOKEN
-# Configure CLOUDDECK_BACKUP_ENCRYPTION_KEY securely in the agent environment first.
-sudo env CLOUDDECK_API_URL=https://api.example.com CLOUDDECK_SERVER_ID=<server-uuid> CLOUDDECK_PAIRING_TOKEN="$CLOUDDECK_PAIRING_TOKEN" CLOUDDECK_AGENT_BIN="$PWD/clouddeck-agent" ./install.sh
-unset CLOUDDECK_PAIRING_TOKEN
+# Start a temporary root shell to avoid putting secrets in command-line arguments.
+sudo -s
+# From inside that root shell, in the services/agent directory:
+read -rs -p "One-time pairing token: " CLOUDDECK_PAIRING_TOKEN; echo
+read -rs -p "Backup encryption key (base64, 32 bytes): " CLOUDDECK_BACKUP_ENCRYPTION_KEY; echo
+export CLOUDDECK_PAIRING_TOKEN CLOUDDECK_BACKUP_ENCRYPTION_KEY
+CLOUDDECK_API_URL=https://api.example.com CLOUDDECK_SERVER_ID=<server-uuid> CLOUDDECK_AGENT_BIN="$PWD/clouddeck-agent" ./install.sh
+unset CLOUDDECK_PAIRING_TOKEN CLOUDDECK_BACKUP_ENCRYPTION_KEY
+exit
 ```
 
 The installer pairs once, saves the long-lived credential in a `0600` file, and starts a dedicated systemd service. Docker access is opt-in via `CLOUDDECK_DOCKER_SOCKET=/var/run/docker.sock`; Docker group membership is effectively root-equivalent. systemd service control should receive only the specific sudo/polkit permissions required by the deployment. Do not grant unrestricted passwordless sudo.
