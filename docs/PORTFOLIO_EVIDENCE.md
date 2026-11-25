@@ -54,3 +54,14 @@ go build ./...
 ```
 
 API/browser integration tests require the PostgreSQL and Redis services and migrations configured by `.github/workflows/ci.yml`. Inspect the workflow run for the exact head SHA rather than reusing a historical green badge.
+
+## November 25 continuation
+
+The previous portfolio PR [#83](https://github.com/The-Null-Catchers/CloudDeck/pull/83) was merged at `b5b9ece8643a01a2eb639080a774563b1b9e55ed`. Its exact head `5ce929831113333c2002a2b86d868d9cc16bf094` passed all five jobs in [CI 44928879638](https://github.com/The-Null-Catchers/CloudDeck/actions/runs/44928879638): Node (including migrations), Chromium E2E and graceful shutdown, Go test/build, Flutter analyze/test/Android release, and unsigned iOS build. No pull-request-triggered run was returned for the merge commit by the connector; do not conflate the two revisions.
+
+New changes on the reused feature branch:
+- Installer validates decoded key length and version before pairing.
+- Disposable directory restore test checks rotated keys, missing/wrong key, corrupted ciphertext, file mode, and unrelated file preservation.
+- Chromium capture test requests six actual screenshots of the labeled synthetic UI; CI uploads them as `clouddeck-portfolio-screenshots`. Logs are a synthetic snapshot, and backups show the honest empty/read-only state. These are not live-host evidence.
+
+All new checks remain pending until CI completes at the new PR head. Review artifact contents before publishing any PNG under docs/images/portfolio. The local execution environment cannot resolve GitHub and has no Docker or Flutter executable; no new local builds or full infrastructure rehearsal were performed. No production systems were contacted.
