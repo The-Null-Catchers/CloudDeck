@@ -11,11 +11,26 @@ fi
 : "${CLOUDDECK_AGENT_BIN:?Set CLOUDDECK_AGENT_BIN to a locally built binary}"
 : "${CLOUDDECK_BACKUP_ENCRYPTION_KEY:?Set CLOUDDECK_BACKUP_ENCRYPTION_KEY to a base64-encoded 32-byte key}"
 CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION=${CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION:-1}
-case "$CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION" in ''|*[!0-9]*|0) echo "Invalid backup encryption key version." >&2; exit 1 ;; esac
-# Validate the active key without printing it or invoking external key tools.
+case "$CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION" in
+  ''|*[!0-9]*) echo "Invalid backup encryption key version." >&2; exit 1 ;;
+esac
+# Match the agent's uint32 key version range before consuming a pairing token.
+if ! awk -v version="$CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION" 'BEGIN { exit !(version >= 1 && version <= 4294967295) }'; then
+  echo "Invalid backup encryption key version." >&2
+  exit 1
+fi
+# Validate the decoded length before pairing. Pass the key through stdin, not argv.
 case "$CLOUDDECK_BACKUP_ENCRYPTION_KEY" in
   *[!a-zA-Z0-9+/=]*|'') echo "Invalid backup encryption key encoding." >&2; exit 1 ;;
 esac
+if ! printf '%s' "$CLOUDDECK_BACKUP_ENCRYPTION_KEY" | base64 --decode >/dev/null 2>&1; then
+  echo "Invalid backup encryption key encoding." >&2
+  exit 1
+fi
+if [ "$(printf '%s' "$CLOUDDECK_BACKUP_ENCRYPTION_KEY" | base64 --decode | wc -c)" -ne 32 ]; then
+  echo "Backup encryption key must decode to exactly 32 bytes." >&2
+  exit 1
+fi
 
 case "$CLOUDDECK_API_URL" in
   https://*) ;;
