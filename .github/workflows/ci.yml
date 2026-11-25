@@ -84,6 +84,13 @@ jobs:
           exit 1
       - name: Run browser E2E tests
         run: npx playwright test apps/web/e2e/auth-dashboard.spec.cjs --browser=chromium --workers=1 --reporter=line
+      - name: Upload genuine synthetic portfolio screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: clouddeck-portfolio-screenshots
+          path: test-results/**/capture-genuine-synthetic-portfolio-screens*/*.png
+          if-no-files-found: error
+          retention-days: 30
       - name: Verify API graceful shutdown
         run: |
           pid="$(cat /tmp/clouddeck-api.pid)"
