@@ -106,3 +106,54 @@ func TestReplaceDirectoryRollsBackWhenActivationFails(t *testing.T){
  data,readErr:=os.ReadFile(filepath.Join(target,"value"));if readErr!=nil{t.Fatal(readErr)}
  if string(data)!="current"{t.Fatalf("rollback did not restore original target: %q",data)}
 }
+
+func TestEncryptedDirectoryRecoveryAfterKeyRotation(t *testing.T) {
+ root:=t.TempDir()
+ source:=filepath.Join(root,"data")
+ if err:=os.Mkdir(source,0700);err!=nil{t.Fatal(err)}
+ value:=filepath.Join(source,"value.txt")
+ unrelated:=filepath.Join(root,"unrelated.txt")
+ if err:=os.WriteFile(value,[]byte("original"),0640);err!=nil{t.Fatal(err)}
+ if err:=os.WriteFile(unrelated,[]byte("untouched"),0600);err!=nil{t.Fatal(err)}
+ t.Setenv("CLOUDDECK_BACKUP_SOURCE_ROOTS",root)
+ t.Setenv("CLOUDDECK_BACKUP_DIR",t.TempDir())
+ oldKey:=base64.StdEncoding.EncodeToString(testEncryptionKey())
+ newKey:=base64.StdEncoding.EncodeToString([]byte(strings.Repeat("N",32)))
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION","7")
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY",oldKey)
+ id:="40404040-4040-4040-8040-404040404040"
+ backup,err:=executeBackup(context.Background(),backupExecutePayload{BackupID:id,Kind:"directory",Source:source,TargetType:"local"})
+ if err!=nil{t.Fatal(err)}
+ if backup.Encryption==nil||backup.Encryption.KeyVersion!=7||!backup.Verified{t.Fatal("missing verified versioned manifest")}
+ path,err:=localBackupArchivePath(backup.StorageKey)
+ if err!=nil{t.Fatal(err)}
+ originalCipher,err:=os.ReadFile(path)
+ if err!=nil{t.Fatal(err)}
+ cipherSHA,err:=backupFileSHA256(path)
+ if err!=nil||cipherSHA!=backup.Encryption.CipherSHA256{t.Fatalf("cipher checksum mismatch: %v",err)}
+ if err:=os.WriteFile(value,[]byte("current"),0640);err!=nil{t.Fatal(err)}
+ restore:=func()error{return restoreFilesystem(context.Background(),filesystemRestorePayload{BackupID:id,Kind:"directory",Source:source,TargetType:"local",StorageKey:backup.StorageKey,ExpectedSHA256:backup.SHA256})}
+ assertValue:=func(want string){t.Helper();got,err:=os.ReadFile(value);if err!=nil||string(got)!=want{t.Fatalf("target = %q, error = %v, want %q",got,err,want)}}
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY_VERSION","8")
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY",newKey)
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY_V7","")
+ if err:=restore();err==nil{t.Fatal("restore accepted missing historical key")}
+ assertValue("current")
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY_V7",newKey)
+ if err:=restore();err==nil{t.Fatal("restore accepted wrong historical key")}
+ assertValue("current")
+ t.Setenv("CLOUDDECK_BACKUP_ENCRYPTION_KEY_V7",oldKey)
+ corrupt:=append([]byte(nil),originalCipher...)
+ corrupt[len(corrupt)-1]^=1
+ if err:=os.WriteFile(path,corrupt,0600);err!=nil{t.Fatal(err)}
+ if err:=restore();err==nil{t.Fatal("restore accepted corrupted ciphertext")}
+ assertValue("current")
+ if err:=os.WriteFile(path,originalCipher,0600);err!=nil{t.Fatal(err)}
+ if err:=restore();err!=nil{t.Fatal(err)}
+ assertValue("original")
+ info,err:=os.Stat(value)
+ if err!=nil{t.Fatal(err)}
+ if info.Mode().Perm()!=0640{t.Fatalf("restored mode = %o, want 640",info.Mode().Perm())}
+ got,err:=os.ReadFile(unrelated)
+ if err!=nil||string(got)!="untouched"{t.Fatalf("unrelated data changed: %q, %v",got,err)}
+}
