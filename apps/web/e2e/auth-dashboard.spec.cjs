@@ -63,3 +63,43 @@ test('fleet hides server creation when the workspace role is viewer',async({page
   await expect(page.getByRole('heading',{name:'Server fleet'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Add server'})).toHaveCount(0);
 });
+
+test('capture genuine synthetic portfolio screens',async({page},testInfo)=>{
+  await page.setViewportSize({width:1440,height:1000});
+  await page.goto(`${baseURL}/login`);
+  await page.getByLabel('Email address').fill(email);
+  await page.getByLabel('Password').fill(password);
+  await page.getByRole('button',{name:/Sign in/}).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  const openDemo=page.getByRole('button',{name:'Open synthetic demo'});
+  if(await openDemo.isVisible())await openDemo.click();
+  await expect(page.getByText('Portfolio demo · synthetic data',{exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Production API',exact:true})).toBeVisible();
+  const capture=async name=>{
+    await page.screenshot({path:testInfo.outputPath(name+'.png'),fullPage:true,animations:'disabled'});
+  };
+  await capture('fleet-dashboard');
+  await page.locator('.server-card').filter({has:page.getByRole('heading',{name:'Production API',exact:true})}).getByRole('button',{name:/View server/}).click();
+  await expect(page.getByRole('heading',{name:'System metrics'})).toBeVisible();
+  await expect(page.getByRole('img',{name:'CPU, memory, and disk usage over time'})).toBeVisible();
+  await capture('server-details');
+  await page.goto(baseURL+'/containers');
+  await expect(page.getByText('Synthetic Docker inventory',{exact:true})).toBeVisible();
+  await expect(page.getByText('clouddeck-api',{exact:true})).toBeVisible();
+  await capture('docker-inventory');
+  await page.goto(baseURL+'/logs');
+  await expect(page.getByText('Synthetic log stream',{exact:true})).toBeVisible();
+  const load=page.getByRole('button',{name:'Load logs'});
+  await expect(load).toBeEnabled();
+  await load.click();
+  await expect(page.getByText(/health check passed/)).toBeVisible();
+  await capture('logs-snapshot');
+  await page.goto(baseURL+'/deployments');
+  await expect(page.getByText('Synthetic deployment history',{exact:true})).toBeVisible();
+  await expect(page.getByText('CloudDeck API',{exact:true}).first()).toBeVisible();
+  await capture('deployment-history');
+  await page.goto(baseURL+'/backups');
+  await expect(page.getByText('Backup controls are disabled in the demo workspace',{exact:true})).toBeVisible();
+  await expect(page.getByText('No backup jobs configured yet.',{exact:true})).toBeVisible();
+  await capture('backup-management');
+});
