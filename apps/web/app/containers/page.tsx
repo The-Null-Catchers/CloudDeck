@@ -59,9 +59,11 @@ export default function ContainersPage(){
   const running=containers.filter(item=>normalizeState(item.state)==='running').length;
   const failedServers=servers.filter(item=>item.error).length;
   const demoMode=org?.demo===true;
+  const canOperate=!demoMode&&['owner','admin','operator'].includes(org?.role??'');
 
   async function act(container:Container,action:'start'|'stop'|'restart'){
-    if(org?.demo)return;
+    if(!canOperate||busy)return;
+    if(!window.confirm(`${action[0].toUpperCase()}${action.slice(1)} ${container.name} on ${container.serverName}?`))return;
     const key=`${container.serverId}:${container.id}`;setBusy(key);setError('');
     try{
       await api(`/servers/${container.serverId}/docker/containers/${container.id}/action`,{method:'POST',body:JSON.stringify({action,confirm:true})});
@@ -90,7 +92,7 @@ export default function ContainersPage(){
           {visible.map(container=>{const key=`${container.serverId}:${container.id}`;const isRunning=normalizeState(container.state)==='running';return <article className={`alert-row ${isRunning?'resolved':'open'}`} key={key}>
             <span className="alert-icon"><Boxes size={18}/></span>
             <div className="alert-copy"><div><strong>{container.name}</strong><span className={`health-state ${isRunning?'resolved':'failing'}`}>{container.state}</span></div><p>{container.image}</p><small>{container.serverName}{container.serverHostname?` · ${container.serverHostname}`:''}{container.composeProject?` · ${container.composeProject}/${container.composeService??''}`:''}</small>{container.ports.length>0&&<small>Ports: {container.ports.slice(0,6).map(port=>`${port.publicPort??'—'}→${port.privatePort}/${port.type}`).join(', ')}</small>}</div>
-            <div className="alert-actions">{!demoMode?<>{isRunning?<button onClick={()=>void act(container,'stop')} disabled={busy===key}><Pause size={14}/> Stop</button>:<button className="primary" onClick={()=>void act(container,'start')} disabled={busy===key}><Play size={14}/> Start</button>}<button onClick={()=>void act(container,'restart')} disabled={busy===key}><RotateCw size={14}/> Restart</button></>:<span className="health-state resolved">Read-only demo</span>}<button onClick={()=>router.push(`/servers/${container.serverId}`)}>Server</button></div>
+            <div className="alert-actions">{canOperate?<>{isRunning?<button onClick={()=>void act(container,'stop')} disabled={busy!==null}><Pause size={14}/> Stop</button>:<button className="primary" onClick={()=>void act(container,'start')} disabled={busy===key}><Play size={14}/> Start</button>}<button onClick={()=>void act(container,'restart')} disabled={busy===key}><RotateCw size={14}/> Restart</button></>:<span className="health-state resolved">{demoMode?'Read-only demo':'Read-only access'}</span>}<button onClick={()=>router.push(`/servers/${container.serverId}`)}>Server</button></div>
           </article>})}
           {!visible.length&&!loading&&<div className="deployment-empty">No containers match the current filters.</div>}
           {loading&&<div className="deployment-empty">Loading container inventory…</div>}
