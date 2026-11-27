@@ -70,3 +70,34 @@ test('synthetic demo servers are excluded from the offline heartbeat sweep', asy
   assert.equal(servers.rows.filter(server => server.status === 'online').length, 3);
   assert.equal(servers.rows.filter(server => server.status === 'offline').length, 1);
 });
+
+
+test('synthetic workspaces reject direct owner host mutations before dispatch',async t=>{
+  const app=buildApp();
+  const email=`demo-readonly-${crypto.randomUUID()}@example.com`;
+  t.after(async()=>{await app.close();await pool.query('DELETE FROM notifications WHERE user_id IN (SELECT id FROM users WHERE email=$1)',[email]);await pool.query('DELETE FROM users WHERE email=$1',[email]);});
+  const registered=await app.inject({method:'POST',url:'/api/v1/auth/register',payload:{email,password:'synthetic readonly passphrase 2026'}});
+  assert.equal(registered.statusCode,201);
+  const headers={authorization:`Bearer ${registered.json().accessToken}`};
+  const created=await app.inject({method:'POST',url:'/api/v1/demo/workspace',headers,payload:{}});
+  assert.equal(created.statusCode,201);
+  const orgId=created.json().organization.id as string;
+  const fleet=await app.inject({method:'GET',url:`/api/v1/organizations/${orgId}/servers`,headers});
+  assert.equal(fleet.statusCode,200);
+  const serverId=fleet.json().servers[0].id;
+  const requests=[
+    {url:'/api/v1/servers',payload:{organizationId:orgId,name:'Must not pair a demo agent'}},
+    {url:`/api/v1/servers/${serverId}/docker/containers/${'a'.repeat(64)}/action`,payload:{action:'restart',confirm:true}},
+    {url:`/api/v1/servers/${serverId}/services/caddy.service/action`,payload:{action:'restart',confirm:true}},
+    {url:`/api/v1/servers/${serverId}/terminal/ticket`,payload:{}},
+  ];
+  for(const request of requests){
+    const denied=await app.inject({method:'POST',headers,...request});
+    assert.equal(denied.statusCode,403,`${request.url}: ${denied.body}`);
+    assert.match(denied.json().error.message,/read-only/);
+  }
+  const rows=await pool.query('SELECT count(*)::integer AS count FROM servers WHERE organization_id=$1',[orgId]);
+  assert.equal(rows.rows[0].count,4);
+  const operations=await pool.query("SELECT action FROM audit_logs WHERE organization_id=$1 AND (action LIKE 'docker.%' OR action LIKE 'systemd.%' OR action LIKE 'terminal.%')",[orgId]);
+  assert.equal(operations.rowCount,0);
+});

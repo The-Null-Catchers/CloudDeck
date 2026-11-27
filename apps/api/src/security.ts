@@ -28,9 +28,10 @@ export const permissions = {
 } as const;
 export function can(role: keyof typeof permissions, permission: string) { return permissions[role].has(permission); }
 export async function membership(userId: string, orgId: string, permission: string) {
-  const result = await pool.query('SELECT role FROM organization_members WHERE user_id=$1 AND organization_id=$2', [userId, orgId]);
+  const result = await pool.query('SELECT m.role,o.demo FROM organization_members m JOIN organizations o ON o.id=m.organization_id WHERE m.user_id=$1 AND m.organization_id=$2', [userId, orgId]);
   const role = result.rows[0]?.role as keyof typeof permissions | undefined;
   if (!role || !can(role, permission)) throw Object.assign(new Error('Access denied'), {statusCode: 403});
+  if(result.rows[0].demo && !permission.endsWith('.read'))throw Object.assign(new Error('Synthetic demo workspaces are read-only'),{statusCode:403});
   return role;
 }
 export async function audit(orgId: string | null, actorId: string | null, action: string, resourceType: string, resourceId: string | null, ip: string, metadata: object = {}, db: Pick<pg.PoolClient,'query'> | typeof pool = pool) {
