@@ -26,7 +26,7 @@ Agents emit heartbeats and CPU/memory/disk/load/network telemetry. The API persi
 An authorized GitHub App installation scopes repository and branch discovery. A deployment resolves a commit, enters a persisted state machine, and is handled by a BullMQ worker with an application-scoped execution lease. The agent performs typed Dockerfile/Compose actions, reports bounded progress/logs, checks readiness, and attempts controlled rollback where supported. Retries and worker crashes must be tested for duplicate execution before production scaling.
 
 ## Backup and recovery
-Allowlisted directories, local Docker volumes, and PostgreSQL/MySQL sources can be archived to local or S3-compatible storage. Archives are validated, encrypted, and accompanied by checksums and versioned key metadata. Filesystem restoration stages data before replacement, preserving a rollback path. Database restore is sensitive and must be rehearsed only against disposable databases.
+Allowlisted directories, local Docker volumes, and PostgreSQL/MySQL sources can be archived to local or S3-compatible storage. Archives are validated, encrypted, and accompanied by checksums and versioned key metadata. Filesystem restoration stages data before replacement, preserving a rollback path. Database restore is sensitive and must be rehearsed only against disposable databases. The opt-in PostgreSQL rehearsal exercises real dump/restore tools against 100 synthetic rows, rejects wrong credentials and verifies historical-key recovery. It does not prove MySQL or atomic interrupted-database recovery. Root and nested directory modes are applied after extraction so read-only directory permissions cannot prevent writing their contents; malformed and duplicate archive paths fail before activation.
 
 ## Engineering trade-offs
 - **Outbound agent versus inbound SSH:** outbound TLS avoids opening management ports on every host, at the cost of WebSocket reconnection and distributed routing complexity.
@@ -36,3 +36,7 @@ Allowlisted directories, local Docker volumes, and PostgreSQL/MySQL sources can 
 
 ## Known limitations and evidence
 See [Feature status](FEATURE_STATUS.md), [Agent protocol](AGENT_PROTOCOL.md), and [Portfolio evidence](PORTFOLIO_EVIDENCE.md). CI results do not replace production-host permission testing, disaster-recovery drills, multi-instance failure injection, or mobile signing. The project is not claimed production-ready until these gates are verified.
+
+## Operational evidence and recovery limits
+
+The [gallery](images/portfolio/README.md) proves genuine synthetic UI rendering at its recorded revision. PostgreSQL-backed API tests exercise session/workspace isolation and execution-lease fencing; separate-process Redis tests exercise command/log/terminal envelope routing. Process-local ticket consumption still requires affinity. Pub/Sub does not replay missed messages, and queued-only deployment reconciliation does not resolve every active execution after a crash. The [recovery runbook](RECOVERY_RUNBOOK.md) makes these limits explicit rather than claiming automatic disaster recovery. Local `/tmp` crypto benchmarks measure memory-backed filesystem behavior; they are not production throughput evidence.

@@ -33,11 +33,11 @@ Capture **genuine running UI** with synthetic labels and redacted tokens at:
 - `docs/images/portfolio/fleet-dashboard.png`
 - `docs/images/portfolio/server-details.png`
 - `docs/images/portfolio/docker-inventory.png`
-- `docs/images/portfolio/realtime-logs.png`
+- `docs/images/portfolio/logs-snapshot.png`
 - `docs/images/portfolio/deployment-history.png`
 - `docs/images/portfolio/backup-management.png`
 
-These files must not be fabricated. Only commit them after capturing the actual running application.
+The [inspected gallery](images/portfolio/README.md) contains genuine historical CI captures and exact provenance. Re-run browser tests for later revisions. Logs show a synthetic snapshot; the backup screen proves only the read-only empty state.
 
 ## 90-second recording script
 - 0–12s: Problem, architecture, fleet overview.

@@ -62,3 +62,19 @@ Baseline is merged PR #83, main `b5b9ece8643a01a2eb639080a774563b1b9e55ed`. See 
 5. P2: improve control-plane metrics and mobile parity based on measured gaps; perform physical-device and signing checks separately.
 
 Do not mark any pending milestone complete before its exact-revision evidence is available.
+
+
+## November 27 verified continuation of PR #84
+
+Completed in this continuation: six inspected historical Chromium images with exact checkout/run/checksum provenance; installer pre-pairing validation and token argv protection; root/read-only-directory restore permission fix and unsafe archive regressions; stronger per-failure staging checks; browser refresh sharing; backend demo mutation denial; mobile timeouts and failure tests; security dependency updates; Compose master-key/GitHub App forwarding; recovery/release/dependency documentation. The actual local PostgreSQL rehearsal recovered 100 rows through historical-key rotation; Go tests/race/build and database-backed API tests passed. See [evidence](docs/PORTFOLIO_EVIDENCE.md) for exact limits and results.
+
+Next priorities remain:
+
+1. Verify final-head five-job CI and repeated cold/reused demo capture.
+2. Independent S3 and MySQL restore/retention/interruption in disposable services.
+3. Real lab Linux pairing, Docker/systemd permission operations and deployment failure/rollback.
+4. Worker/API/Redis crash recovery and two-instance fault injection, including ticket affinity.
+5. Full control-plane DR rehearsal and representative load measurements.
+6. Physical mobile device/accessibility checks, approved licensing and maintainer release review.
+
+Do not mark host operations, S3/MySQL recovery, production performance or signed mobile distribution complete from synthetic fixtures or unsigned builds.
