@@ -1,0 +1,12 @@
+goos: linux
+goarch: amd64
+pkg: github.com/The-Null-Catchers/CloudDeck/services/agent
+cpu: Intel(R) Core(TM) i5-1035G1 CPU @ 1.00GHz
+BenchmarkBackupPayload/encrypt-8         	       3	  15572276 ns/op	 538.69 MB/s	 9506952 B/op	      50 allocs/op
+BenchmarkBackupPayload/encrypt-8         	       3	  15862978 ns/op	 528.82 MB/s	 9505202 B/op	      48 allocs/op
+BenchmarkBackupPayload/encrypt-8         	       3	  15592935 ns/op	 537.97 MB/s	 9505202 B/op	      48 allocs/op
+BenchmarkBackupPayload/decrypt-8         	       3	  15946507 ns/op	 526.05 MB/s	16845445 B/op	      73 allocs/op
+BenchmarkBackupPayload/decrypt-8         	       3	  15807052 ns/op	 530.69 MB/s	16845445 B/op	      73 allocs/op
+BenchmarkBackupPayload/decrypt-8         	       3	  15413025 ns/op	 544.25 MB/s	16845440 B/op	      73 allocs/op
+PASS
+ok  	github.com/The-Null-Catchers/CloudDeck/services/agent	0.446s

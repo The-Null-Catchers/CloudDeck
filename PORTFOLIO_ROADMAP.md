@@ -70,7 +70,7 @@ Completed in this continuation: six inspected historical Chromium images with ex
 
 Next priorities remain:
 
-1. Verify final-head five-job CI and repeated cold/reused demo capture.
+1. Verify final-head five-job CI. Cold full browser suite (4/4) and repeated capture (3/3) now pass; reviewed latest images and raw local burst/recovery measurements are committed.
 2. Independent S3 and MySQL restore/retention/interruption in disposable services.
 3. Real lab Linux pairing, Docker/systemd permission operations and deployment failure/rollback.
 4. Worker/API/Redis crash recovery and two-instance fault injection, including ticket affinity.
