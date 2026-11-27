@@ -91,7 +91,8 @@ test('capture genuine synthetic portfolio screens',async({page},testInfo)=>{
   await expect(page.getByText('Portfolio demo · synthetic data',{exact:true})).toBeVisible();
   await expect(page.getByRole('heading',{name:'Production API',exact:true})).toBeVisible();
   const capture=async name=>{
-    await expect(page.getByRole('alert')).toHaveCount(0);
+    // Next.js mounts an empty ARIA route-announcer alert; reject application notices.
+    await expect(page.locator('.notice')).toHaveCount(0);
     await expect(page.getByRole('status')).toHaveCount(0);
     await page.evaluate(()=>document.fonts.ready);
     await page.screenshot({path:testInfo.outputPath(name+'.png'),fullPage:true,animations:'disabled'});
