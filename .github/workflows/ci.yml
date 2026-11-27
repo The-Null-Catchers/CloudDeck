@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   node:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17
@@ -136,7 +136,7 @@ jobs:
           kill $(cat /tmp/clouddeck-web.pid 2>/dev/null) 2>/dev/null || true
 
   agent:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults: {run: {working-directory: services/agent}}
     steps:
       - uses: actions/checkout@v4
@@ -147,7 +147,7 @@ jobs:
       - run: go build ./...
 
   mobile:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/mobile
@@ -160,6 +160,12 @@ jobs:
           cache: true
       - run: chmod +x tool/bootstrap_android.sh
       - run: ./tool/bootstrap_android.sh
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: 'apps/mobile/android/**/*.gradle*'
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
