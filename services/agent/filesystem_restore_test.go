@@ -309,6 +309,14 @@ func TestRestorePreservesRootAndReadOnlyDirectoryModes(t *testing.T) {
 			t.Fatalf("%s mode = %o, want %o", path, info.Mode().Perm(), want)
 		}
 	}
+	// A second restore must also remove the now read-only previous tree.
+	if err := restoreFilesystem(context.Background(), filesystemRestorePayload{BackupID: id, Kind: "directory", Source: source, TargetType: "local", StorageKey: backup.StorageKey, ExpectedSHA256: backup.SHA256}); err != nil {
+		t.Fatal(err)
+	}
+	rollback, err := filepath.Glob(filepath.Join(root, ".data.clouddeck-rollback-*"))
+	if err != nil || len(rollback) != 0 {
+		t.Fatalf("plaintext rollback tree remains: %v %v", rollback, err)
+	}
 	data, err := os.ReadFile(filepath.Join(nested, "value"))
 	if err != nil || string(data) != "before" {
 		t.Fatalf("restore contents: %q %v", data, err)

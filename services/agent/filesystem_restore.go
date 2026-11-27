@@ -149,16 +149,7 @@ func extractFilesystemArchive(ctx context.Context, archivePath, target, expected
 	if err != nil {
 		return "", func() {}, errors.New("unable to create restore staging directory")
 	}
-	cleanup := func() {
-		// Restored directories may be read-only; regain traversal only in our staging tree.
-		_ = filepath.WalkDir(stage, func(path string, entry os.DirEntry, err error) error {
-			if err == nil && entry.IsDir() {
-				return os.Chmod(path, 0700)
-			}
-			return err
-		})
-		_ = os.RemoveAll(stage)
-	}
+	cleanup := func() { _ = removeRestoreTree(stage) }
 	if err := os.Chmod(stage, 0700); err != nil {
 		cleanup()
 		return "", func() {}, errors.New("unable to secure restore staging directory")
@@ -300,6 +291,27 @@ func extractFilesystemArchive(ctx context.Context, archivePath, target, expected
 	return stage, cleanup, nil
 }
 
+// Only used for agent-created staging and preserved rollback trees. WalkDir does
+// not follow links; directory modes are relaxed only after activation or failure.
+func removeRestoreTree(root string) error {
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return os.Chmod(path, 0700)
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(root)
+}
+
 func replaceDirectoryWithRollback(target, stage, backupID string) error {
 	target = filepath.Clean(target)
 	parent := filepath.Dir(target)
@@ -322,7 +334,9 @@ func replaceDirectoryWithRollback(target, stage, backupID string) error {
 		return errors.New("unable to activate restored filesystem")
 	}
 	restored = true
-	_ = os.RemoveAll(rollback)
+	if err := removeRestoreTree(rollback); err != nil {
+		return errors.New("filesystem restored but previous tree cleanup failed")
+	}
 	return nil
 }
 

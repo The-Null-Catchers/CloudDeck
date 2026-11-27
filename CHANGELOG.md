@@ -3,7 +3,7 @@
 ## Unreleased — PR #84 portfolio continuation
 
 - Prevent pairing-token exposure in installer process arguments; validate malformed/short/long keys, bounded versions and missing inputs before pairing with isolated installer tests.
-- Preserve restored root and nested directory permissions, including read-only directories; reject duplicate/traversal archive entries and verify failed-restore staging cleanup.
+- Preserve restored root and nested directory permissions, including read-only directories; remove read-only previous trees after activation and report cleanup failures explicitly; reject duplicate/traversal archive entries and verify failed-restore staging cleanup.
 - Enforce synthetic-workspace read-only permissions in the API, including owner host-operation requests.
 - Remove the synthetic-demo hydration race; isolate portfolio fixtures from operator fixtures and assert loaded/read-only states before genuine captures.
 - Run CI on main pushes and PRs without duplicate feature-push runs; pin npm 11.9.0 and retain the five required job names.
