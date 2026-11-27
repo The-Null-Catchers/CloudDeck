@@ -56,8 +56,11 @@ install -m 0755 "$CLOUDDECK_AGENT_BIN" /usr/local/bin/clouddeck-agent
 install -d -o clouddeck -g clouddeck -m 0700 /var/lib/clouddeck-agent
 install -d -o root -g root -m 0755 /etc/clouddeck-agent
 
-# The short-lived pairing token exists only in this process environment.
-runuser -u clouddeck -- env CLOUDDECK_API_URL="$CLOUDDECK_API_URL" CLOUDDECK_SERVER_ID="$CLOUDDECK_SERVER_ID" CLOUDDECK_PAIRING_TOKEN="$CLOUDDECK_PAIRING_TOKEN" CLOUDDECK_CREDENTIAL_FILE=/var/lib/clouddeck-agent/credential.json /usr/local/bin/clouddeck-agent --pair-only
+# Export before dropping privileges: env KEY=value would expose the token in argv.
+export CLOUDDECK_API_URL CLOUDDECK_SERVER_ID CLOUDDECK_PAIRING_TOKEN
+CLOUDDECK_CREDENTIAL_FILE=/var/lib/clouddeck-agent/credential.json
+export CLOUDDECK_CREDENTIAL_FILE
+runuser -u clouddeck -- /usr/local/bin/clouddeck-agent --pair-only
 unset CLOUDDECK_PAIRING_TOKEN
 
 config_tmp=$(mktemp /etc/clouddeck-agent/agent.env.XXXXXX)
