@@ -11,7 +11,7 @@
     "dev:web": "npm run dev -w @clouddeck/web",
     "build": "npm run build -w @clouddeck/shared && npm run build -w @clouddeck/api && npm run build -w @clouddeck/web",
     "typecheck": "npm run build -w @clouddeck/shared && npm run typecheck --workspaces --if-present",
-    "test": "npm run test -w @clouddeck/api",
+    "test": "npm run test -w @clouddeck/api && node --import tsx --test apps/web/test/*.test.ts",
     "migrate": "npm run migrate -w @clouddeck/api",
     "lint": "eslint apps packages --ext .ts,.tsx"
   },

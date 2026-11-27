@@ -22,6 +22,7 @@ services:
       DATABASE_URL: postgres://clouddeck:${POSTGRES_PASSWORD}@postgres:5432/clouddeck
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      CLOUDDECK_MASTER_KEY: ${CLOUDDECK_MASTER_KEY:?set CLOUDDECK_MASTER_KEY}
       APP_ORIGIN: ${APP_ORIGIN:?set APP_ORIGIN}
       NODE_ENV: production
       SMTP_HOST: mailpit
