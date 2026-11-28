@@ -133,7 +133,8 @@ test('synthetic workspaces reject owner transfer even for their owner',async t=>
   });
   assert.equal(response.statusCode,403,response.body);
   assert.match(response.json().error.message,/read-only/);
+  const owner=await pool.query('SELECT id FROM users WHERE email=$1',[ownerEmail]);
   const roles=await pool.query('SELECT user_id,role FROM organization_members WHERE organization_id=$1',[organizationId]);
-  assert.equal(roles.rows.find(row=>row.user_id===registered.json().userId)?.role,'owner');
+  assert.equal(roles.rows.find(row=>row.user_id===owner.rows[0].id)?.role,'owner');
   assert.equal(roles.rows.find(row=>row.user_id===targetId)?.role,'admin');
 });
