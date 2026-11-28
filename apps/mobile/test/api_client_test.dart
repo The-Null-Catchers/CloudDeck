@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:clouddeck_mobile/core/api_client.dart';
@@ -14,6 +15,58 @@ final class MemorySessionStore implements SessionStore {
 }
 
 void main(){
+  test('request timeout surfaces a retryable error and preserves stored session',() async {
+    final store=MemorySessionStore()..token='existing-refresh';
+    final api=ApiClient(
+      sessionStore:store,
+      client:MockClient((_)=>Completer<http.Response>().future),
+      baseUrl:'https://clouddeck.test',
+      requestTimeout:const Duration(milliseconds:10),
+    );
+    await expectLater(api.restoreSession(),throwsA(isA<ApiException>().having((error)=>error.message,'message',contains('timed out'))));
+    expect(store.token,'existing-refresh');
+    api.close();
+  });
+
+  test('network interruption preserves refresh token for reconnection',() async {
+    final store=MemorySessionStore()..token='existing-refresh';
+    final api=ApiClient(
+      sessionStore:store,
+      client:MockClient((_)async=>throw http.ClientException('offline')),
+      baseUrl:'https://clouddeck.test',
+    );
+    await expectLater(api.restoreSession(),throwsA(isA<ApiException>()));
+    expect(store.token,'existing-refresh');
+    api.close();
+  });
+
+  test('concurrent session recovery consumes the rotating refresh token once',() async {
+    final store=MemorySessionStore()..token='refresh-1';
+    final entered=Completer<void>();
+    final response=Completer<http.Response>();
+    var refreshes=0;
+    final api=ApiClient(
+      sessionStore:store,
+      client:MockClient((request)async {
+        if(request.url.path=='/api/v1/auth/mobile/refresh'){
+          refreshes++;
+          if(!entered.isCompleted)entered.complete();
+          return response.future;
+        }
+        expect(request.headers['authorization'],'Bearer access-2');
+        return http.Response('[]',200);
+      }),
+      baseUrl:'https://clouddeck.test',
+    );
+    final requests=Future.wait([api.get('/one'),api.get('/two')]);
+    await entered.future;
+    response.complete(http.Response(jsonEncode({'accessToken':'access-2','refreshToken':'refresh-2'}),200));
+    expect(await requests,[[],[]]);
+    expect(refreshes,1);
+    expect(store.token,'refresh-2');
+    api.close();
+  });
+
   test('API client rotates native refresh token after an access-token 401',() async {
     final store=MemorySessionStore();
     var protectedCalls=0;

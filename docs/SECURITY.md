@@ -10,7 +10,7 @@ RBAC: viewers can read inventory, metrics and logs; operators can perform approv
 
 Realtime Docker/systemd log streams use one-time tickets and are forwarded in memory without log persistence. Browser terminal sessions also use one-time tickets, a dedicated `terminal.access` permission, PTYs, a 30-minute hard timeout, and start/stop audit records. Terminal contents are not stored.
 
-Known production blockers remain: agent credential rotation UI, distributed agent/stream/terminal routing, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, encrypted backup payloads, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
+Known production blockers remain: agent credential rotation UI, cross-instance ticket consumption and Redis interruption rehearsal, richer log redaction policy, notification preferences and non-email channels, external KMS-backed secret key rotation, real encrypted backup recovery drills, additional terminal isolation controls, and a completed external security assessment. Do not publish the API without TLS and a trusted reverse proxy, and never commit production credentials.
 
 
 ## Health-check SSRF boundary
@@ -60,7 +60,7 @@ Backup execution is not a generic archive or filesystem API. Directory jobs are 
 
 The API never chooses an Agent destination path. Archives are stored only in `CLOUDDECK_BACKUP_DIR` using a UUID-derived filename and mode 0600. Successful status requires a full post-write archive read plus SHA-256 metadata. Retention and deletion use the separate `backup.deleteLocal` action, which accepts only the UUID-derived storage key rather than arbitrary paths.
 
-Backup creation and deletion require `backup.manage` (admins/owners); viewers and operators receive metadata-only `backup.read`. PostgreSQL and MySQL jobs reference encrypted `backup` secrets. The API decrypts credentials only at execution time and sends a strict structured object over the authenticated Agent channel; credentials are never copied into backup job metadata or audit records. The Agent invokes fixed database dump binaries directly without a shell, puts passwords in temporary 0600 client credential files rather than command arguments, discards command stderr, and removes staging credentials after archival. PostgreSQL dumps additionally require `pg_restore --list` to succeed before archival verification. Remote S3 durability, payload encryption, scheduled execution, and restore support remain pending.
+Backup creation and deletion require `backup.manage` (admins/owners); viewers and operators receive metadata-only `backup.read`. PostgreSQL and MySQL jobs reference encrypted `backup` secrets. The API decrypts credentials only at execution time and sends a strict structured object over the authenticated Agent channel; credentials are never copied into backup job metadata or audit records. The Agent invokes fixed database dump binaries directly without a shell, puts passwords in temporary 0600 client credential files rather than command arguments, discards command stderr, and removes staging credentials after archival. PostgreSQL dumps additionally require `pg_restore --list` to succeed before archival verification. Local and S3 payload encryption, recurring scheduling, and confirmed database/filesystem restore are implemented. Real object-store durability and disposable database recovery must still be rehearsed independently of fixture tests.
 
 Database backup archives contain only the dump directory. Temporary PostgreSQL/MySQL credential files remain in a separate parent staging directory and are removed with staging on success or failure. Passwords containing NUL or line breaks and option-shaped database names are rejected before execution. Regression tests inspect both archive formats and failed-run cleanup.
 
@@ -89,7 +89,7 @@ Backup and restore start paths lock the owning backup-job row before creating a 
 
 The Agent verifies the recorded archive SHA-256 before any database mutation. S3 restore downloads are signed, redirect-free, prefix-scoped, bounded by the configured backup size limit, and must match both S3 checksum metadata and the persisted backup checksum. Archive extraction accepts only the generated database-dump layout and rejects extra entries.
 
-PostgreSQL and MySQL clients are executed directly without a shell. Credentials are delivered only for the active restore and are written to temporary 0600 client files that are removed with the restore staging directory. Command stdout/stderr are discarded so database data and credentials are not persisted into CloudDeck logs. Filesystem and Docker-volume restore are not exposed yet because safe replacement requires an additional rollback boundary.
+PostgreSQL and MySQL clients are executed directly without a shell. Credentials are delivered only for the active restore and are written to temporary 0600 client files that are removed with the restore staging directory. Command stdout/stderr are discarded so database data and credentials are not persisted into CloudDeck logs. Filesystem and Docker-volume restores use the separate staged rollback boundary below. Database clients can partially mutate a database before failing; these restores are not transactionally rolled back by CloudDeck.
 
 
 ## Filesystem restore boundary
@@ -127,3 +127,11 @@ CloudDeck accepts RFC 6238-style SHA-1 TOTP codes with six digits, a 30-second p
 Enabling TOTP generates ten one-time recovery codes. Only SHA-256 hashes of normalized codes are stored. A recovery code is consumed atomically inside the same transaction that completes a challenge, so concurrent reuse cannot succeed. Recovery-code regeneration and TOTP disable both require the current password plus a valid TOTP or unused recovery code.
 
 Disabling TOTP revokes all other active sessions and invalidates outstanding two-factor challenges. Audit entries record setup start, enable, challenge creation, successful factor-backed login, recovery-code replacement, disable, and failed proxy-independent authentication events without storing secrets or factor codes.
+
+## Backup key and installer validation
+
+The installer rejects missing keys, malformed base64, decoded lengths other than 32 bytes, and versions outside 1–4294967295 before pairing or host installation. The active version defaults to 1. Pairing credentials are inherited through the process environment rather than passed to `env` in argv. Service key material is written to a root-owned 0600 environment file. Retain `CLOUDDECK_BACKUP_ENCRYPTION_KEY_V<version>` in protected agent configuration when rotating the active key. Re-running installation is not a keyring migration workflow: provision and verify historical keys separately before restarting. Environment secrecy still depends on the host privilege boundary.
+
+Synthetic workspaces are read-only at the API membership boundary: all non-read permissions are denied even to owners. Direct Docker/systemd mutations, terminal tickets and server creation are covered by integration tests; hidden UI controls alone do not authorize or protect operations.
+
+After successful filesystem activation, read-only directories in the preserved previous tree are made traversable only for cleanup; links are not followed. A second restore regression verifies that no plaintext rollback tree remains. If cleanup itself fails, the agent reports that the restored target is already active and previous-tree cleanup failed; operators must inspect this outcome rather than assume activation was rolled back.

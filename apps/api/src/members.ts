@@ -129,6 +129,8 @@ export async function memberRoutes(app:FastifyInstance){
     const {userId}=await authenticate(request);
     const {orgId}=orgParams.parse(request.params);
     const {memberId}=transferBody.parse(request.body);
+    // Ownership transfer is a workspace mutation; synthetic demo workspaces are read-only.
+    await membership(userId,orgId,'member.manage');
     if(memberId===userId)throw Object.assign(new Error('You already own this workspace'),{statusCode:409});
 
     const transfer=await transaction(async client=>{

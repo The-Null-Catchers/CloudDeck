@@ -2,7 +2,9 @@
 
 CloudDeck is a production-oriented multi-server operations and observability platform for developers, DevOps engineers, and small teams. It combines server monitoring, Docker operations, Linux service control, deployments, logs, uptime monitoring, backups, alerts, secure remote access, and workspace collaboration in one control plane.
 
-> **Portfolio capture pending:** genuine application screenshots will be added under `docs/images/portfolio/` after a reproducible synthetic demo run. The previous placeholder is deliberately not presented as evidence.
+[![CloudDeck synthetic fleet dashboard](docs/images/portfolio/fleet-dashboard.png)](docs/images/portfolio/README.md)
+
+[Genuine Chromium gallery and source revision](docs/images/portfolio/README.md): [server metrics](docs/images/portfolio/server-details.png), [Docker inventory](docs/images/portfolio/docker-inventory.png), [synthetic log snapshot](docs/images/portfolio/logs-snapshot.png), [deployment history](docs/images/portfolio/deployment-history.png), and [empty backup management](docs/images/portfolio/backup-management.png). These captures demonstrate synthetic UI behavior; they do not prove real infrastructure operations or backup execution.
 
 [Portfolio demo instructions](docs/PORTFOLIO_DEMO.md) · [Engineering case study](docs/CASE_STUDY.md) · [Verification evidence](docs/PORTFOLIO_EVIDENCE.md)
 
@@ -65,14 +67,16 @@ CloudDeck deliberately separates the control plane from privileged host operatio
 
 ## Local development
 
-Requires Node 22, npm 11, PostgreSQL 17, Redis, and Go 1.23.
+Requires Node 22, npm 11.9.0, PostgreSQL 17, Redis 7, and Go 1.23. Mobile CI uses Flutter 3.47.6; browser verification uses Playwright 1.55.0.
 
 ```bash
 cp .env.example .env
+# Edit connection URLs and generate real local JWT/master keys first.
+set -a; . ./.env; set +a
 npm ci
 npm run migrate
 npm run dev
-npm run dev:web
+PORT=3000 npm run dev:web # second terminal, after exporting the same .env
 ```
 
 Generate a local development master key once with `openssl rand -base64 32` and place it in `CLOUDDECK_MASTER_KEY`. Production deployments should inject it through the platform secret manager rather than committing it.
@@ -157,3 +161,7 @@ See [docs/FEATURE_STATUS.md](docs/FEATURE_STATUS.md) for the detailed implementa
 ## Portfolio roadmap
 
 See the [repository-specific portfolio roadmap](PORTFOLIO_ROADMAP.md) for priorities, acceptance criteria, demo scope, and release evidence. This complements the existing implementation and status documentation.
+
+## Release status and licensing
+
+See the [changelog](CHANGELOG.md), [release checklist](docs/RELEASE_CHECKLIST.md), and [operational recovery runbook](docs/RECOVERY_RUNBOOK.md). No top-level license has been authorized; maintainers must choose licensing before a public release. Android packaging and unsigned iOS CI do not establish device or store readiness.

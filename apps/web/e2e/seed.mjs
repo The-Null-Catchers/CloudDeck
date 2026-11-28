@@ -36,6 +36,17 @@ try{
       [org.rows[0].id,userId]
     );
   }
+  await client.query(
+    `INSERT INTO users(email,password_hash,email_verified_at) VALUES($1,$2,now())
+     ON CONFLICT(email) DO UPDATE SET password_hash=EXCLUDED.password_hash,email_verified_at=now()`,
+    ['portfolio-e2e@clouddeck.local',hash]
+  );
+  const portfolio=await client.query('SELECT id FROM users WHERE email=$1',['portfolio-e2e@clouddeck.local']);
+  const member=await client.query('SELECT 1 FROM organization_members WHERE user_id=$1',[portfolio.rows[0].id]);
+  if(!member.rowCount){
+    const org=await client.query("INSERT INTO organizations(name,personal) VALUES('Portfolio E2E Workspace',true) RETURNING id");
+    await client.query("INSERT INTO organization_members(organization_id,user_id,role) VALUES($1,$2,'owner')",[org.rows[0].id,portfolio.rows[0].id]);
+  }
   await client.query('COMMIT');
   console.log(`Seeded ${email}`);
 }catch(error){

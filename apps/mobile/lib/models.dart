@@ -1,10 +1,12 @@
 final class Organization {
-  const Organization({required this.id, required this.name, required this.role});
+  const Organization({required this.id, required this.name, required this.role, this.demo=false});
   final String id;
   final String name;
   final String role;
+  final bool demo;
+  bool get canOperate=>!demo&&const {'owner','admin','operator'}.contains(role);
   factory Organization.fromJson(Map<String, dynamic> json) => Organization(
-    id: json['id'] as String, name: json['name'] as String, role: json['role'] as String);
+    id: json['id'] as String, name: json['name'] as String, role: json['role'] as String, demo: json['demo']==true);
 }
 final class DashboardStats {
   const DashboardStats({required this.total,required this.online,required this.offline,required this.openAlerts});

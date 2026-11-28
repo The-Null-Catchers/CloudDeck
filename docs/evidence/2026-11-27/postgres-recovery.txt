@@ -1,0 +1,5 @@
+=== RUN   TestDisposablePostgresEncryptedRecovery
+    postgres_rehearsal_test.go:96: backup=170.011356ms restore=40.547356ms rows_and_content_hash=100:ace2109d029a4a53b1240f942bd8aa4f archive_bytes=1349 plaintext_sha256=e5aaab40c186c922d39523201233a66adca1f0c2fe15501835cfd67bacdb1539 cipher_sha256=b3f568abffb8bc02446073427b174b1e4ecd223769eaa7e3bed14a4c21ccea29 objects=1 historical_key_version=1
+--- PASS: TestDisposablePostgresEncryptedRecovery (0.44s)
+PASS
+ok  	github.com/The-Null-Catchers/CloudDeck/services/agent	0.452s

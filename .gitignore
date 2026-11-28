@@ -13,3 +13,7 @@ apps/mobile/.dart_tool/
 apps/mobile/build/
 apps/mobile/android/
 apps/mobile/.metadata
+
+# Browser evidence is reviewed before selected PNGs enter docs/images/portfolio.
+test-results/
+playwright-report/

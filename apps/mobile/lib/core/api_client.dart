@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -19,6 +20,7 @@ final class ApiClient {
     required this.sessionStore,
     http.Client? client,
     String? baseUrl,
+    this.requestTimeout = const Duration(seconds: 20),
   })  : _client = client ?? http.Client(),
         baseUrl = (baseUrl ??
                 const String.fromEnvironment(
@@ -30,6 +32,7 @@ final class ApiClient {
   final SessionStore sessionStore;
   final http.Client _client;
   final String baseUrl;
+  final Duration requestTimeout;
   String? _accessToken;
   Future<bool>? _refreshInFlight;
 
@@ -187,25 +190,28 @@ final class ApiClient {
         HttpHeaders.authorizationHeader: 'Bearer $authorization',
     };
     try {
-      return switch (method) {
-        'GET' => await _client.get(uri, headers: headers),
-        'POST' => await _client.post(
+      final pending = switch (method) {
+        'GET' => _client.get(uri, headers: headers),
+        'POST' => _client.post(
             uri,
             headers: headers,
             body: body == null ? null : jsonEncode(body),
           ),
-        'PUT' => await _client.put(
+        'PUT' => _client.put(
             uri,
             headers: headers,
             body: body == null ? null : jsonEncode(body),
           ),
-        'DELETE' => await _client.delete(
+        'DELETE' => _client.delete(
             uri,
             headers: headers,
             body: body == null ? null : jsonEncode(body),
           ),
         _ => throw ApiException('Unsupported mobile API method'),
       };
+      return await pending.timeout(requestTimeout);
+    } on TimeoutException {
+      throw ApiException('CloudDeck request timed out. Try again.');
     } on SocketException {
       throw ApiException('Unable to reach CloudDeck');
     } on http.ClientException {

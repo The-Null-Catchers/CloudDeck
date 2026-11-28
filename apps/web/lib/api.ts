@@ -1,11 +1,17 @@
 const base = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 let accessToken: string | null = null;
 export function setAccessToken(value:string|null) {accessToken=value;}
-export async function refresh() {
-  const response=await fetch(`${base}/api/v1/auth/refresh`,{method:'POST',credentials:'include'});
-  if (!response.ok) return false;
-  accessToken=(await response.json()).accessToken;
-  return true;
+let refreshInFlight:Promise<boolean>|null=null;
+export function refresh():Promise<boolean> {
+  if(refreshInFlight)return refreshInFlight;
+  // Rotating cookies must be consumed only once when a page starts parallel reads.
+  refreshInFlight=(async()=>{
+    const response=await fetch(`${base}/api/v1/auth/refresh`,{method:'POST',credentials:'include'});
+    if(!response.ok){if(response.status===401)accessToken=null;return false;}
+    accessToken=(await response.json()).accessToken;
+    return true;
+  })().finally(()=>{refreshInFlight=null;});
+  return refreshInFlight;
 }
 export async function api<T>(path:string, init:RequestInit={}):Promise<T> {
   if (!accessToken && !await refresh()) throw new Error('Sign in required');

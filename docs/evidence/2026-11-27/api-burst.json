@@ -1,0 +1,22 @@
+{
+  "sourceSha": "2ae580f6bbefabc2b8427d1df90707af6d76cf72",
+  "dirty": false,
+  "node": "v22.23.5",
+  "os": "Linux 7.2.15-4-omarchy x64",
+  "cpu": "Intel(R) Core(TM) i5-1035G1 CPU @ 1.00GHz",
+  "logicalCPUs": 8,
+  "ramBytes": 16528609280,
+  "scope": "local synthetic dashboard/fleet reads; PostgreSQL17 Redis7; one API; four fixture servers; no live agents",
+  "count": 60,
+  "concurrency": 4,
+  "warmup": 10,
+  "durationMs": 305.41343400000005,
+  "throughputPerSecond": 196.45501251919387,
+  "p50Ms": 19.745772999999986,
+  "p95Ms": 26.015017000000057,
+  "p99Ms": 27.63782399999991,
+  "errors": 0,
+  "statuses": {
+    "200": 60
+  }
+}

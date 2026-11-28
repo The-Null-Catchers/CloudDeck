@@ -28,7 +28,7 @@ final class AppState extends ChangeNotifier {
   List<DeploymentItem> deployments=const [];
   List<NotificationItem> notifications=const [];
 
-  bool get canOperate=>const {'owner','admin','operator'}.contains(organization?.role);
+  bool get canOperate=>organization?.canOperate??false;
   int get unreadNotifications=>notifications.where((item)=>item.readAt==null).length;
 
   Future<void> bootstrap() async {

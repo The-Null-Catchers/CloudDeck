@@ -35,7 +35,7 @@ This document tracks the production-facing feature state of CloudDeck. A capabil
 - Per-container inspect, stats, bounded logs, and lifecycle controls.
 - Docker Compose project/service discovery and start/stop/restart controls.
 - systemd service inventory and start/stop/restart controls.
-- Sensitive actions are typed, validated, RBAC-protected, and audited.
+- Sensitive actions are typed, validated, RBAC-protected, and audited. Synthetic workspaces reject mutations in shared API authorization, including owner requests; the UI is not the boundary.
 
 ### Deployments
 - Application/source configuration through GitHub App installations.
@@ -65,7 +65,7 @@ This document tracks the production-facing feature state of CloudDeck. A capabil
 - No unrestricted generic remote-command endpoint.
 
 ### Mobile
-- Flutter authentication/session foundation.
+- Flutter authentication/session foundation, shared refresh and bounded API waits; timeout/offline failures preserve stored refresh credentials unless the server revokes them.
 - Server monitoring and historical metrics.
 - Alerts and notifications.
 - Deployment status.
@@ -93,3 +93,7 @@ The core platform is functional. Remaining work is mostly release hardening and 
 - Remote operational actions require workspace authorization and are audited.
 - Log and terminal payloads are bounded and validated.
 - Workspace-scoped APIs validate membership before returning operational data.
+
+## Verified scope versus release readiness
+
+Implementation does not imply full operational verification. See [current evidence](PORTFOLIO_EVIDENCE.md) for exact revisions, the six-image gallery, PostgreSQL rehearsal and local test counts. Real S3/MySQL recovery, Docker/systemd/deployment lab operations, distributed fault recovery, physical devices and production benchmarks remain open. Local browser/core session tests and CI packaging must be read separately. Log/terminal ticket issuance and upgrade currently need replica affinity.

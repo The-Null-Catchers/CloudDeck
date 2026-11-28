@@ -63,3 +63,64 @@ test('fleet hides server creation when the workspace role is viewer',async({page
   await expect(page.getByRole('heading',{name:'Server fleet'})).toBeVisible();
   await expect(page.getByRole('button',{name:'Add server'})).toHaveCount(0);
 });
+
+test('capture genuine synthetic portfolio screens',async({page},testInfo)=>{
+  // Use a separate seeded user so demo-first organization ordering never changes
+  // the operator tests, including repeated runs against the same database.
+  test.setTimeout(60_000);
+  await page.route('**/api/v1/organizations',async route=>{
+    // Deliberately delay the initial workspace response to exercise hydration.
+    const response=await route.fetch();
+    await new Promise(resolve=>setTimeout(resolve,250));
+    await route.fulfill({response});
+  });
+  await page.setViewportSize({width:1440,height:1000});
+  await page.goto(`${baseURL}/login`);
+  await page.getByLabel('Email address').fill('portfolio-e2e@clouddeck.local');
+  await page.getByLabel('Password').fill(password);
+  await page.getByRole('button',{name:/Sign in/}).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  const openDemo=page.getByRole('button',{name:'Open synthetic demo'});
+  const demoBanner=page.getByText('Portfolio demo · synthetic data',{exact:true});
+  await expect(openDemo.or(demoBanner)).toBeVisible();
+  if(await openDemo.isVisible()){
+    const created=page.waitForResponse(response=>response.url().endsWith('/api/v1/demo/workspace')&&response.request().method()==='POST');
+    await openDemo.click();
+    expect((await created).ok()).toBeTruthy();
+  }
+  await expect(page.getByText('Portfolio demo · synthetic data',{exact:true})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Production API',exact:true})).toBeVisible();
+  const capture=async name=>{
+    // Next.js mounts an empty ARIA route-announcer alert; reject application notices.
+    await expect(page.locator('.notice')).toHaveCount(0);
+    await expect(page.getByRole('status')).toHaveCount(0);
+    await page.evaluate(()=>document.fonts.ready);
+    await page.screenshot({path:testInfo.outputPath(name+'.png'),fullPage:true,animations:'disabled'});
+  };
+  await capture('fleet-dashboard');
+  await page.locator('.server-card').filter({has:page.getByRole('heading',{name:'Production API',exact:true})}).getByRole('button',{name:/View server/}).click();
+  await expect(page.getByRole('heading',{name:'System metrics'})).toBeVisible();
+  await expect(page.getByRole('img',{name:'CPU, memory, and disk usage over time'})).toBeVisible();
+  await capture('server-details');
+  await page.goto(baseURL+'/containers');
+  await expect(page.getByText('Synthetic Docker inventory',{exact:true})).toBeVisible();
+  await expect(page.getByText('clouddeck-api',{exact:true})).toBeVisible();
+  await capture('docker-inventory');
+  await page.goto(baseURL+'/logs');
+  await expect(page.getByText('Synthetic log snapshot',{exact:true})).toBeVisible();
+  const load=page.getByRole('button',{name:'Load logs'});
+  await expect(load).toBeEnabled();
+  await load.click();
+  await expect(page.getByText(/health check passed/)).toBeVisible();
+  await capture('logs-snapshot');
+  await page.goto(baseURL+'/deployments');
+  await expect(page.getByText('Synthetic deployment history',{exact:true})).toBeVisible();
+  await expect(page.getByText('CloudDeck API',{exact:true}).first()).toBeVisible();
+  await expect(page.getByText('HEALTH_CHECK_FAILED',{exact:true})).toBeVisible();
+  await expect(page.getByRole('button',{name:'Deploy now'})).toBeDisabled();
+  await capture('deployment-history');
+  await page.goto(baseURL+'/backups');
+  await expect(page.getByText('Backup controls are disabled in the demo workspace',{exact:true})).toBeVisible();
+  await expect(page.getByText('No backup jobs configured yet.',{exact:true})).toBeVisible();
+  await capture('backup-management');
+});

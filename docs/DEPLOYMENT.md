@@ -2,7 +2,7 @@
 
 This is a development foundation, not a supported production rollout. Populate `POSTGRES_PASSWORD`, `JWT_SECRET`, `APP_ORIGIN`, and `PUBLIC_API_URL` in a local `.env` at the repository root. Run `docker compose -f infra/docker-compose.yml up -d --build`, then `docker compose -f infra/docker-compose.yml exec api npm run migrate -w @clouddeck/api`. Place a TLS reverse proxy in front of loopback ports 3000/4000, forwarding WebSocket Upgrade headers for `/api/v1/agent/connect/*`. Set `APP_ORIGIN` to the exact web origin and `PUBLIC_API_URL` to the external API origin.
 
-The image currently includes development dependencies to run migrations, and Compose does not start a job worker. Replace local Mailpit with a real SMTP relay, and configure database backups, monitoring retention, and secret management before production. Never use a demo server as evidence of live health. Install the agent from a locally built binary using `services/agent/install.sh` as described in the README. Its dedicated service account has no Docker access by default.
+The image currently includes development dependencies to run migrations, and the API process starts deployment and notification workers and their PostgreSQL reconcilers. Replace local Mailpit with a real SMTP relay, and configure database backups, monitoring retention, and secret management before production. Never use a demo server as evidence of live health. Install the agent from a locally built binary using `services/agent/install.sh` as described in the README. Its dedicated service account has no Docker access by default.
 
 
 ## Application deployment lifecycle
@@ -20,7 +20,7 @@ successful -> rolled-back
 
 Skipping phases, retrying terminal states, or mutating a failed/rolled-back deployment is rejected. Every successful transition appends a `deployment_events` record. The deployment row records start/finish timestamps and a bounded failure code when applicable.
 
-The public API currently exposes deployment history/read endpoints only. Enqueueing and transition mutation stay internal until the BullMQ worker, GitHub source resolution, image build, agent deployment, health activation, and rollback orchestration are implemented together. This prevents queued records from pretending work is happening when no worker exists.
+The public API supports authorized deployment enqueue, cancellation, history and confirmed rollback. BullMQ dispatch and PostgreSQL state transitions remain distinct: queue acceptance alone never proves build or activation.
 
 
 ## GitHub App connection
@@ -117,7 +117,7 @@ This change provides durable dispatch and recovery only. State execution remains
 
 ## Dockerfile deployment execution
 
-BullMQ jobs are now consumed by an in-process deployment worker so the worker can reuse the authenticated outbound Agent WebSocket registry. This is intentionally a single-API-instance design; horizontal execution routing remains a future Redis/gateway concern.
+BullMQ jobs are now consumed by an in-process deployment worker so the worker can reuse the authenticated outbound Agent WebSocket registry. Redis-backed command ownership routes execution to an agent on another API replica. Log/terminal ticket issuance and upgrade still need replica affinity; Redis interruption and full worker crash recovery remain separate release gates.
 
 For Dockerfile applications, the worker:
 
@@ -320,3 +320,7 @@ METRICS_HOURLY_RETENTION_DAYS=90
 Raw retention is constrained to 24–168 hours. Hourly retention is constrained to 30–365 days. Invalid or out-of-range values fall back to the defaults.
 
 The API runs the rollup every ten minutes. Completed hours are upserted before raw rows become eligible for deletion, so a delayed/crashed runner does not create a historical gap merely because the retention cutoff passed.
+
+## Backup and recovery configuration
+
+New backups require an agent-local base64 32-byte `CLOUDDECK_BACKUP_ENCRYPTION_KEY` and uint32 version (default 1). Retain historical `_V<version>` keys before changing the active version. The installer validates before pairing and writes a protected environment file, but does not migrate historical keys automatically. Allowlist synthetic source roots and grant only the required systemd writable paths. S3 credentials belong in encrypted workspace backup secrets; production endpoints require HTTPS. See [security](SECURITY.md) and the [recovery runbook](RECOVERY_RUNBOOK.md).

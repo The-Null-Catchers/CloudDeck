@@ -50,3 +50,31 @@ A hosted demo is optional. Code execution, server administration, and secret man
 - Review the final diff and verify required checks for its exact SHA before merging. Follow branch protection.
 - For documentation-only changes with no applicable workflow, verify content and links and record the checks actually performed.
 - Tie performance, security, and readiness claims to supporting evidence.
+
+## Continuation: November 25, 2026
+
+Baseline is merged PR #83, main `b5b9ece8643a01a2eb639080a774563b1b9e55ed`. See the evidence ledger for the verified previous PR CI. Priorities for the new branch:
+
+1. P0: verify new screenshot capture and inspect the six actual Chromium artifacts before adding them to README. Keep synthetic log snapshots and empty backup inventory labeled accurately.
+2. P0: verify installer validation and rotated-key directory recovery regression in CI.
+3. P1: rehearse real S3-compatible storage and isolated database recovery, including interrupted backups and retention.
+4. P1: exercise GitHub App deployment, rollback, Redis interruption, worker restart and multi-instance routing on disposable infrastructure.
+5. P2: improve control-plane metrics and mobile parity based on measured gaps; perform physical-device and signing checks separately.
+
+Do not mark any pending milestone complete before its exact-revision evidence is available.
+
+
+## November 27 verified continuation of PR #84
+
+Completed in this continuation: six inspected historical Chromium images with exact checkout/run/checksum provenance; installer pre-pairing validation and token argv protection; root/read-only-directory restore permission fix and unsafe archive regressions; stronger per-failure staging checks; browser refresh sharing; backend demo mutation denial; mobile timeouts and failure tests; security dependency updates; Compose master-key/GitHub App forwarding; recovery/release/dependency documentation. The actual local PostgreSQL rehearsal recovered 100 rows through historical-key rotation; Go tests/race/build and database-backed API tests passed. See [evidence](docs/PORTFOLIO_EVIDENCE.md) for exact limits and results.
+
+Next priorities remain:
+
+1. Verify final-head five-job CI. Cold full browser suite (4/4) and repeated capture (3/3) now pass; reviewed latest images and raw local burst/recovery measurements are committed.
+2. Independent S3 and MySQL restore/retention/interruption in disposable services.
+3. Real lab Linux pairing, Docker/systemd permission operations and deployment failure/rollback.
+4. Worker/API/Redis crash recovery and two-instance fault injection, including ticket affinity.
+5. Full control-plane DR rehearsal and representative load measurements.
+6. Physical mobile device/accessibility checks, approved licensing and maintainer release review.
+
+Do not mark host operations, S3/MySQL recovery, production performance or signed mobile distribution complete from synthetic fixtures or unsigned builds.

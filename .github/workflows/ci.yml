@@ -1,11 +1,17 @@
 name: CI
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   node:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:17
@@ -27,6 +33,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: {node-version: '22', cache: npm}
+      - run: npm install --global npm@11.9.0
       - run: npm ci
       - run: npm run migrate
       - run: npm run lint
@@ -60,6 +67,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: {node-version: '22', cache: npm}
+      - run: npm install --global npm@11.9.0
       - run: npm ci
       - run: npm run migrate
       - run: node apps/web/e2e/seed.mjs
@@ -84,6 +92,13 @@ jobs:
           exit 1
       - name: Run browser E2E tests
         run: npx playwright test apps/web/e2e/auth-dashboard.spec.cjs --browser=chromium --workers=1 --reporter=line
+      - name: Upload genuine synthetic portfolio screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: clouddeck-portfolio-screenshots
+          path: test-results/**/*.png
+          if-no-files-found: error
+          retention-days: 30
       - name: Verify API graceful shutdown
         run: |
           pid="$(cat /tmp/clouddeck-api.pid)"
@@ -121,7 +136,7 @@ jobs:
           kill $(cat /tmp/clouddeck-web.pid 2>/dev/null) 2>/dev/null || true
 
   agent:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults: {run: {working-directory: services/agent}}
     steps:
       - uses: actions/checkout@v4
@@ -132,7 +147,7 @@ jobs:
       - run: go build ./...
 
   mobile:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: apps/mobile
@@ -145,6 +160,12 @@ jobs:
           cache: true
       - run: chmod +x tool/bootstrap_android.sh
       - run: ./tool/bootstrap_android.sh
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: 'apps/mobile/android/**/*.gradle*'
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test

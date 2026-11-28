@@ -40,6 +40,9 @@ Current allowlist includes explicit Docker inventory, lifecycle, inspection, and
 - `systemd.tailLogs`
 - `backup.execute`
 - `backup.deleteLocal`
+- `backup.deleteS3`
+- `backup.restoreDatabase`
+- `backup.restoreFilesystem`
 
 Compose operations resolve containers by `com.docker.compose.project` and `com.docker.compose.service` labels and then call the Docker Engine API. They do not invoke a shell or depend on the Docker Compose CLI. Project and service names are strictly validated. Container inspection intentionally excludes environment variables and command arguments.
 
@@ -57,7 +60,7 @@ The agent returns `command.result` with either validated data or a bounded error
 
 Log tail requests are intentionally bounded to 500 lines and 256 KiB. They are snapshots, not fake realtime streams. Long-lived log streaming will use a dedicated subscription lifecycle rather than the 15-second request/response command timeout.
 
-The in-memory connection registry currently supports a single API instance. Horizontal API scaling requires Redis-backed routing/pub-sub or a dedicated agent gateway.
+The local WebSocket registry is supplemented by Redis-backed ownership and command routing when REDIS_URL is configured. Separate-process routing is integration-tested; Redis outage behavior requires additional fault injection.
 
 
 ## Realtime log subscriptions
@@ -73,7 +76,7 @@ Long-lived logs use a dedicated stream lifecycle and never reuse the 15-second c
 
 Each line is capped at 4000 characters. Docker frames larger than 64 KiB are rejected. Initial tail is capped at 500 lines. Stream data is forwarded in memory and is not persisted to PostgreSQL.
 
-Tickets and active agent routing are currently process-local. Horizontal API scaling requires Redis-backed ticket/session routing or a dedicated gateway before multiple API replicas are enabled.
+Log tickets remain process-local: ticket issuance and WebSocket upgrade require affinity to one API replica. Active agent stream envelopes can route across API processes through Redis.
 
 
 ## Authorized terminal sessions
@@ -89,12 +92,12 @@ Terminal access is intentionally separate from the allowlisted command protocol.
 
 Terminal contents are never persisted by CloudDeck. Audit records contain actor, server, timestamps, session ID, and close reason only. The shell is started directly through a PTY, not through the typed command dispatcher. The agent accepts an absolute local shell path via `CLOUDDECK_TERMINAL_SHELL` (default `/bin/bash`).
 
-Terminal tickets and routing are process-local in this phase. Horizontal API scaling requires distributed session routing before multiple API replicas are enabled.
+Terminal tickets remain process-local and require affinity between ticket issuance and WebSocket upgrade. Terminal envelopes route through Redis to an agent connected to another API process; an API restart closes its sessions.
 
 
 ## Deployment execution
 
-`deployment.execute` is an explicit allowlisted long-running action; it is not a generic shell command. Its payload is strictly validated and supports Dockerfile deployments only in this phase.
+`deployment.execute` is an explicit allowlisted long-running action; it is not a generic shell command. Its payload is strictly validated and supports Dockerfile and the constrained Compose executor described below.
 
 The Agent emits bounded `deployment.progress` envelopes for `cloning`, `building`, `deploying`, and `health-checking`. The API maps those envelopes onto the guarded deployment state machine.
 
