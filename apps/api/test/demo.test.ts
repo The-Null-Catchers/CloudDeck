@@ -107,12 +107,11 @@ test('synthetic workspaces reject owner transfer even for their owner',async t=>
   const app=buildApp();
   const ownerEmail=`demo-transfer-owner-${crypto.randomUUID()}@example.com`;
   const targetEmail=`demo-transfer-target-${crypto.randomUUID()}@example.com`;
-  let organizationId:string|undefined;
-  let targetId:string|undefined;
+  const cleanupState:{organizationId?:string;targetId?:string}={};
   t.after(async()=>{
     await app.close();
-    if(organizationId&&targetId)await pool.query('DELETE FROM organization_members WHERE organization_id=$1 AND user_id=$2',[organizationId,targetId]);
-    if(targetId)await pool.query('DELETE FROM users WHERE id=$1',[targetId]);
+    if(cleanupState.organizationId&&cleanupState.targetId)await pool.query('DELETE FROM organization_members WHERE organization_id=$1 AND user_id=$2',[cleanupState.organizationId,cleanupState.targetId]);
+    if(cleanupState.targetId)await pool.query('DELETE FROM users WHERE id=$1',[cleanupState.targetId]);
     await pool.query('DELETE FROM notifications WHERE user_id IN (SELECT id FROM users WHERE email=$1)',[ownerEmail]);
     await pool.query('DELETE FROM users WHERE email=$1',[ownerEmail]);
   });
@@ -121,20 +120,20 @@ test('synthetic workspaces reject owner transfer even for their owner',async t=>
   const headers={authorization:`Bearer ${registered.json().accessToken}`};
   const created=await app.inject({method:'POST',url:'/api/v1/demo/workspace',headers,payload:{}});
   assert.equal(created.statusCode,201);
-  organizationId=created.json().organization.id as string;
+  cleanupState.organizationId=created.json().organization.id as string;
   const target=await pool.query("INSERT INTO users(email,password_hash) VALUES($1,'test-only-unused-hash') RETURNING id",[targetEmail]);
-  targetId=target.rows[0].id as string;
-  await pool.query("INSERT INTO organization_members(organization_id,user_id,role) VALUES($1,$2,'admin')",[organizationId,targetId]);
+  cleanupState.targetId=target.rows[0].id as string;
+  await pool.query("INSERT INTO organization_members(organization_id,user_id,role) VALUES($1,$2,'admin')",[cleanupState.organizationId,cleanupState.targetId]);
   const response=await app.inject({
     method:'POST',
-    url:`/api/v1/organizations/${organizationId}/owner-transfer`,
+    url:`/api/v1/organizations/${cleanupState.organizationId}/owner-transfer`,
     headers,
-    payload:{memberId:targetId,confirm:true}
+    payload:{memberId:cleanupState.targetId,confirm:true}
   });
   assert.equal(response.statusCode,403,response.body);
   assert.match(response.json().error.message,/read-only/);
   const owner=await pool.query('SELECT id FROM users WHERE email=$1',[ownerEmail]);
-  const roles=await pool.query('SELECT user_id,role FROM organization_members WHERE organization_id=$1',[organizationId]);
+  const roles=await pool.query('SELECT user_id,role FROM organization_members WHERE organization_id=$1',[cleanupState.organizationId]);
   assert.equal(roles.rows.find(row=>row.user_id===owner.rows[0].id)?.role,'owner');
-  assert.equal(roles.rows.find(row=>row.user_id===targetId)?.role,'admin');
+  assert.equal(roles.rows.find(row=>row.user_id===cleanupState.targetId)?.role,'admin');
 });
